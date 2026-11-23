@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <SDL2/SDL.h>
+#include <common/config/kidmode.h>
 #include <common/platform/board.h>
 #include <common/config/config.h>
 #include <common/platform/device.h>
@@ -874,7 +875,7 @@ int main(const int argc, char *argv[]) {
     char resume_path[512] = "";
     int load_blocked = 0;
     const int startup_netplay = startup.netplay_host || startup.netplay_address[0];
-    int has_resume = !startup.fresh && !startup_netplay && state_saves_supported()
+    int has_resume = !startup.fresh && !startup_netplay && !kid_mode_active() && state_saves_supported()
                      && gamestate_find_most_recent(resume_path, sizeof(resume_path), &load_blocked) == 0;
     loading_startup_progress(has_resume ? lang.muxretro.content_resuming : startup_message, show_startup_messages);
 

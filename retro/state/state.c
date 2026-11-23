@@ -7,6 +7,7 @@
 #include <common/display/language.h>
 #include <common/runtime/log.h>
 #include <common/ui/nav.h>
+#include <common/config/kidmode.h>
 #include "../core/governor_boost.h"
 #include "../core/perf.h"
 #include "../core/muxretro.h"
@@ -36,6 +37,8 @@ int state_saves_supported(void) {
 }
 
 int state_saves_allowed(void) {
+    // Kid mode behaves like a GBA cartridge: in-game saves (SRAM) only, no save states
+    if (kid_mode_active()) return 0;
     return core_state_available() && !netplay_is_active() && link_get_mode() == link_mode_off;
 }
 

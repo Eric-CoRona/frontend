@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <common/runtime/init.h>
+#include <common/config/kidmode.h>
 #include <common/platform/input.h>
 #include <common/display/language.h>
 #include <common/runtime/log.h>
@@ -296,7 +297,9 @@ int hotkeys_task(void) {
     int hotkey_now[hotkey_binding_count];
     for (int binding = 0; binding < hotkey_binding_count; binding++) {
         const int button = session_settings_hotkey_button((enum hotkey_binding) binding);
-        hotkey_now[binding] = button != HOTKEY_UNBOUND && mux_input_pressed((mux_input_type) button);
+        // Kid mode: every emulator hotkey is off; only a plain Menu press (pause screen) remains
+        hotkey_now[binding] =
+            !kid_mode_active() && button != HOTKEY_UNBOUND && mux_input_pressed((mux_input_type) button);
     }
 
     int open_pause = 0;
@@ -453,6 +456,11 @@ static nav_repeat_t rpt_vol_down = {0};
 static int prev_vol_up = 0;
 static int prev_vol_down = 0;
 
+static nav_repeat_t rpt_kid_bright_up = {0};
+static nav_repeat_t rpt_kid_bright_down = {0};
+static int prev_kid_l2 = 0;
+static int prev_kid_r2 = 0;
+
 static inotify_status *level_ino = NULL;
 
 static void level_watch_task(const uint32_t now) {
@@ -505,4 +513,20 @@ void hotkeys_volume_bright_task(void) {
 
     prev_vol_up = vol_up_now;
     prev_vol_down = vol_down_now;
+
+    // Kid mode: L2 dims and R2 brightens, like the GBA SP light button. GBA games never use L2/R2.
+    if (kid_mode_active()) {
+        const int l2_now = mux_input_pressed(mux_input_l2);
+        const int r2_now = mux_input_pressed(mux_input_r2);
+
+        if (nav_repeat_step(&rpt_kid_bright_down, l2_now && !prev_kid_l2, l2_now, 1, now)) {
+            ui_common_handle_bright_down();
+        }
+        if (nav_repeat_step(&rpt_kid_bright_up, r2_now && !prev_kid_r2, r2_now, 1, now)) {
+            ui_common_handle_bright_up();
+        }
+
+        prev_kid_l2 = l2_now;
+        prev_kid_r2 = r2_now;
+    }
 }

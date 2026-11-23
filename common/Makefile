@@ -14,7 +14,7 @@ RUNTIME_SRCS = \
 
 CONFIG_SRCS = \
     config/config.c config/config_value.c config/ini.c config/kiosk.c \
-    config/passcode.c config/skip.c config/var_store.c
+    config/passcode.c config/skip.c config/var_store.c config/kidmode.c
 
 PLATFORM_SRCS = \
     platform/audio.c platform/battery.c platform/bluetooth.c platform/board.c \

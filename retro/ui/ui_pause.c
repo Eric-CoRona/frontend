@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <common/config/kidmode.h>
 #include <common/platform/audio.h>
 #include <common/platform/battery.h>
 #include <common/config/config.h>
@@ -105,6 +106,16 @@ static void compute_row_indices(void) {
         row_restart = 1;
         row_quit = 2;
         row_count = 3;
+        return;
+    }
+
+    if (kid_mode_active()) {
+        // Kid mode: only "Keep playing" and "Go home"
+        row_game_state = row_netplay = row_cheevo = row_game_link = row_disc_control = -1;
+        row_cheats = row_patches = row_content_switch = row_settings = row_information = row_restart = -1;
+        row_resume = 0;
+        row_quit = 1;
+        row_count = 2;
         return;
     }
 
@@ -886,8 +897,8 @@ void pause_menu_rebuild(void) {
     if (row_patches >= 0) add_label("patch", lang.muxretro.patches, lang.muxretro.help.pause.patches);
     if (row_content_switch >= 0) add_label("switch", lang.content_switch.title, lang.content_switch.help);
     if (row_settings >= 0) add_label("settings", lang.muxretro.settings, lang.muxretro.help.pause.settings);
-    add_label("info", lang.muxretro.information, lang.muxretro.help.pause.information);
-    add_label("restart", lang.muxretro.restart, lang.muxretro.help.pause.restart);
+    if (row_information >= 0) add_label("info", lang.muxretro.information, lang.muxretro.help.pause.information);
+    if (row_restart >= 0) add_label("restart", lang.muxretro.restart, lang.muxretro.help.pause.restart);
     add_label("exit", lang.muxretro.quit, lang.muxretro.help.pause.quit);
 
     ui_count_static = row_count;
@@ -1406,7 +1417,7 @@ int pause_menu_tick(void) {
             play_sound(snd_confirm);
             if (state_saves_allowed() && session_settings_auto_save_on_quit() && gamestate_autosave_save())
                 return perform_quit();
-            if (gamestate_autosave_exists) return perform_quit();
+            if (gamestate_autosave_exists || kid_mode_active()) return perform_quit();
             request_destructive_action(destructive_quit);
         }
     }

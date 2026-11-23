@@ -1,6 +1,8 @@
 #include <string.h>
 #include <common/ui/kidfont.h>
 #include <common/ui/common.h>
+#include <common/platform/battery.h>
+#include <common/storage/fileio.h>
 
 #define KID_GLYPH_W 5
 #define KID_GLYPH_H 7
@@ -251,4 +253,119 @@ static void kid_style_bar(lv_obj_t *panel, lv_obj_t *icon, lv_obj_t *bar) {
 void kid_style_progress_bars(void) {
     kid_style_bar(ui_pnl_progress_brightness, ui_ico_progress_brightness, ui_bar_progress_brightness);
     kid_style_bar(ui_pnl_progress_volume, ui_ico_progress_volume, ui_bar_progress_volume);
+}
+
+// ---- Pixel battery ----------------------------------------------------------------------
+
+#define KID_BAT_W 60
+#define KID_BAT_H 32
+#define KID_BAT_SEGS 4
+
+static const char *kid_bolt[6] = {"00110", "01100", "11111", "00110", "01100", "11000"};
+
+static lv_obj_t *kid_box(lv_obj_t *parent, const int x, const int y, const int w, const int h) {
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    return o;
+}
+
+// Children of the returned container: 0 = body (bars inside it), 1 = nub, 2 = bolt.
+lv_obj_t *kid_battery_create(lv_obj_t *parent, int scale) {
+    if (scale < 1) scale = 1;
+    const int s = scale;
+    const int w = KID_BAT_W * s, h = KID_BAT_H * s;
+
+    lv_obj_t *root = lv_obj_create(parent);
+    lv_obj_remove_style_all(root);
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(root, w + 6 * s + 6 + 27 * s, h + 4);
+
+    lv_obj_t *body = kid_box(root, 0, 0, w, h);
+    lv_obj_set_style_bg_color(body, lv_color_hex(KID_COL_PANEL), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(body, 3 * s, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_color(body, lv_color_hex(KID_COL_SEA), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_color(body, lv_color_hex(KID_COL_SHADOW), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_ofs_x(body, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_ofs_y(body, 4, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_shadow_opa(body, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    const int gap = 3 * s;
+    const int seg_w = (w - 10 * s - (KID_BAT_SEGS - 1) * gap) / KID_BAT_SEGS;
+    for (int i = 0; i < KID_BAT_SEGS; i++) {
+        kid_box(body, 2 * s + i * (seg_w + gap), 2 * s, seg_w, h - 11 * s);
+    }
+
+    kid_box(root, w, h / 2 - 6 * s, 6 * s, 12 * s);
+
+    lv_obj_t *bolt = lv_obj_create(root);
+    lv_obj_remove_style_all(bolt);
+    lv_obj_clear_flag(bolt, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(bolt, w + 12 * s, h / 2 - 9 * s);
+    lv_obj_set_size(bolt, 15 * s, 18 * s);
+    for (int r = 0; r < 6; r++) {
+        for (int c = 0; c < 5; c++) {
+            if (kid_bolt[r][c] != '1') continue;
+            lv_obj_t *px = kid_box(bolt, c * 3 * s, r * 3 * s, 3 * s, 3 * s);
+            lv_obj_set_style_bg_color(px, lv_color_hex(KID_COL_BLUE), LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+    }
+    lv_obj_add_flag(bolt, LV_OBJ_FLAG_HIDDEN);
+
+    kid_battery_set(root, 100, 0);  // real level set by the caller
+    return root;
+}
+
+void kid_battery_set(lv_obj_t *battery, int percent, const int charging) {
+    if (!battery || !lv_obj_is_valid(battery)) return;
+    if (percent < 0) percent = 100; // no reading yet: show full rather than a false "low"
+    if (percent > 100) percent = 100;
+
+    lv_obj_t *body = lv_obj_get_child(battery, 0);
+    lv_obj_t *nub = lv_obj_get_child(battery, 1);
+    lv_obj_t *bolt = lv_obj_get_child(battery, 2);
+
+    const int low = percent <= KID_LOW_BATTERY_PCT && !charging;
+    int segs = (percent + 24) / 25;
+    if (segs < 1) segs = 1;
+
+    const uint32_t edge = low ? KID_COL_LOW : KID_COL_SEA;
+    const uint32_t fill = charging ? KID_COL_BLUE : (low ? KID_COL_LOW : KID_COL_GREEN);
+
+    lv_obj_set_style_border_color(body, lv_color_hex(edge), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(nub, lv_color_hex(edge), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    for (int i = 0; i < KID_BAT_SEGS; i++) {
+        lv_obj_t *seg = lv_obj_get_child(body, i);
+        lv_obj_set_style_bg_color(seg, lv_color_hex(fill), LV_PART_MAIN | LV_STATE_DEFAULT);
+        if (i < segs) {
+            lv_obj_clear_flag(seg, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(seg, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    if (charging) {
+        lv_obj_clear_flag(bolt, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(bolt, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// -1 until the battery daemon has written a reading (so nothing looks "low" at boot).
+int kid_battery_percent(void) {
+    if (!file_exist("/run/muos/battery/capacity")) return -1;
+    return battery_get_capacity();
+}
+
+int kid_battery_charging(void) {
+    return battery_is_charging();
+}
+
+int kid_battery_low(void) {
+    const int pct = kid_battery_percent();
+    return pct >= 0 && !battery_is_charging() && pct <= KID_LOW_BATTERY_PCT;
 }

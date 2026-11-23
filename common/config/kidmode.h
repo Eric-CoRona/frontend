@@ -9,5 +9,6 @@
 
 // How often the in-game runner writes changed in-game saves to the card in kid mode.
 #define KID_SRAM_FLUSH_SECONDS 10
+#define KID_IDLE_SLEEP_SECONDS 180
 
 int kid_mode_active(void);

@@ -1,6 +1,8 @@
 #include "muxshare.h"
 #include "ui/ui_muxcharge.h"
 #include <common/platform/battery.h>
+#include <common/config/kidmode.h>
+#include <common/ui/kidfont.h>
 
 static int exit_status = -1;
 static int blank_timeout = 3;
@@ -11,6 +13,66 @@ static char voltage_info[MAX_BUFFER_SIZE];
 
 #define CHARGER_BRIGHT "/tmp/charger_bright"
 #define CHARGER_EXIT   "/tmp/charger_exit"
+
+// Kid mode: the charging screen in the boot-logo style (battery picture, CHARGING, percent).
+static lv_obj_t *kid_layer;
+static lv_obj_t *kid_bat;
+static lv_obj_t *kid_pct;
+static lv_obj_t *kid_hint;
+
+static void kid_charge_build(void) {
+    const int sw = device.mux.width;
+    const int sh = device.mux.height;
+
+    kid_layer = lv_obj_create(ui_scr_charge_charge);
+    lv_obj_remove_style_all(kid_layer);
+    lv_obj_clear_flag(kid_layer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(kid_layer, sw, sh);
+    lv_obj_center(kid_layer);
+    kid_style_background(kid_layer);
+
+    lv_obj_t *panel = lv_obj_create(kid_layer);
+    lv_obj_remove_style_all(panel);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(panel, sw * 62 / 100, sh * 62 / 100);
+    lv_obj_center(panel);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(KID_COL_PANEL), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(panel, lv_color_hex(KID_COL_SEA), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(panel, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_color(panel, lv_color_hex(KID_COL_SHADOW), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_ofs_x(panel, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_ofs_y(panel, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_opa(panel, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+
+    kid_bat = kid_battery_create(panel, 2);
+    lv_obj_align(kid_bat, LV_ALIGN_TOP_MID, 0, sh * 7 / 100);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_obj_set_style_text_font(title, kid_font(4), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(title, lv_color_hex(KID_COL_GREEN), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_text(title, "CHARGING");
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, sh * 2 / 100);
+
+    kid_pct = lv_label_create(panel);
+    lv_obj_set_style_text_font(kid_pct, kid_font(3), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(kid_pct, lv_color_hex(KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_text(kid_pct, "");
+    lv_obj_align(kid_pct, LV_ALIGN_CENTER, 0, sh * 12 / 100);
+
+    kid_hint = lv_label_create(panel);
+    lv_obj_set_style_text_font(kid_hint, kid_font(2), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(kid_hint, lv_color_hex(KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_recolor(kid_hint, true);
+    lv_label_set_text(kid_hint, "#78E650 START#  TO PLAY");
+    lv_obj_align(kid_hint, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
+}
+
+static void kid_charge_update(const int percent) {
+    if (!kid_layer) return;
+    kid_battery_set(kid_bat, percent, 1);
+    lv_label_set_text_fmt(kid_pct, "%d%%", percent);
+}
 
 static void check_for_cable(void) {
     if (file_exist(device.battery.charger) && !read_line_int_from(device.battery.charger, 1)) exit_status = 1;
@@ -66,6 +128,7 @@ static void handle_start(void) {
     lv_obj_add_flag(ui_lbl_voltage_charge, MU_OBJ_FLAG_HIDE_FLOAT);
 
     lv_label_set_text(ui_lbl_boot_charge, lang.muxcharge.boot);
+    if (kid_hint) lv_label_set_text(kid_hint, "STARTING...");
     lv_refr_now(NULL);
 
     exit_status = 0;
@@ -123,6 +186,7 @@ static void battery_task_charge(lv_timer_t *timer __attribute__((unused))) {
 
     lv_label_set_text(ui_lbl_capacity_charge, capacity_info);
     lv_label_set_text(ui_lbl_voltage_charge, voltage_info);
+    kid_charge_update(bat_cap);
 
     blank_timeout--;
 }
@@ -160,6 +224,8 @@ int main(void) {
 
     LOG_INFO(mux_module, "Charging Statistics Y Position: %d", theme.charger.y_pos);
     lv_obj_set_y(ui_pnl_charge_charge, theme.charger.y_pos);
+
+    if (kid_mode_active()) kid_charge_build();
 
     check_for_cable();
     battery_task_charge(NULL);

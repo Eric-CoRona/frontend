@@ -12,6 +12,8 @@
 #define KID_IDX_FILE   "/tmp/kid_idx"
 #define KID_PARENT_MS  3000
 #define KID_GBA_CAT    "Nintendo Game Boy Advance"
+#define KID_BAT_POLL_MS   5000
+#define KID_LOW_REPEAT_MS (5 * 60 * 1000)
 
 
 typedef struct {
@@ -38,6 +40,17 @@ static lv_obj_t *lbl_empty;
 static lv_obj_t *btn_power;
 static lv_obj_t *lbl_power;
 static lv_obj_t *pnl_confirm;
+static lv_obj_t *btn_no;
+static lv_obj_t *btn_yes;
+static lv_obj_t *lbl_no;
+static lv_obj_t *lbl_yes;
+static lv_obj_t *arr_power;
+static lv_obj_t *bat_icon;
+static lv_obj_t *pnl_low;
+static lv_obj_t *msg_panel;
+static int confirm_yes;
+static uint32_t low_warned_ms;
+static int low_warned;
 
 static lv_obj_t *pnl_msg;
 static lv_obj_t *lbl_msg;
@@ -303,11 +316,29 @@ static void build_ui(void) {
     const int sh = device.mux.height;
 
     // Shut Down button, top right. Up selects it, A asks to confirm.
-    btn_power = make_panel(ui_screen, 9 * 6 * 2 + 28, 7 * 2 + 22);
+    // A small pixel up-arrow shows it is reached with Up.
+    btn_power = make_panel(ui_screen, 9 * 6 * 2 + 28 + 22, 7 * 2 + 22);
     lv_obj_align(btn_power, LV_ALIGN_TOP_RIGHT, -sw * 4 / 100, sh * 4 / 100);
+    arr_power = lv_obj_create(btn_power);
+    lv_obj_remove_style_all(arr_power);
+    lv_obj_clear_flag(arr_power, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(arr_power, 8, 8);
+    lv_obj_align(arr_power, LV_ALIGN_LEFT_MID, 8, 0);
+    for (int r = 0; r < 4; r++) {
+        lv_obj_t *row = lv_obj_create(arr_power);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_pos(row, 3 - r, r * 2);
+        lv_obj_set_size(row, 2 + r * 2, 2);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    }
     lbl_power = make_label(btn_power, 2, KID_COL_BLUE);
     lv_label_set_text(lbl_power, "SHUT DOWN");
-    lv_obj_center(lbl_power);
+    lv_obj_align(lbl_power, LV_ALIGN_LEFT_MID, 24, 0);
+
+    // Battery level, top left, level with the Shut Down button.
+    bat_icon = kid_battery_create(ui_screen, 1);
+    lv_obj_align(bat_icon, LV_ALIGN_TOP_LEFT, sw * 4 / 100, sh * 4 / 100 + 2);
+    kid_battery_set(bat_icon, kid_battery_percent(), kid_battery_charging());
 
     tile_w[slot_cur] = sw * 38 / 100;
     tile_h[slot_cur] = sh * 44 / 100;
@@ -358,7 +389,7 @@ static void build_ui(void) {
     lv_obj_center(lbl_empty);
     lv_obj_add_flag(lbl_empty, LV_OBJ_FLAG_HIDDEN);
 
-    pnl_confirm = make_panel(ui_screen, sw * 66 / 100, sh * 42 / 100);
+    pnl_confirm = make_panel(ui_screen, sw * 66 / 100, sh * 46 / 100);
     lv_obj_set_style_bg_opa(pnl_confirm, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
     lv_obj_set_style_border_color(pnl_confirm, lv_color_hex(KID_COL_GREEN), MU_OBJ_MAIN_DEFAULT);
     lv_obj_set_style_border_width(pnl_confirm, 5, MU_OBJ_MAIN_DEFAULT);
@@ -366,12 +397,27 @@ static void build_ui(void) {
 
     lv_obj_t *lbl_confirm = make_label(pnl_confirm, 4, KID_COL_GREEN);
     lv_label_set_text(lbl_confirm, "SHUT DOWN?");
-    lv_obj_align(lbl_confirm, LV_ALIGN_CENTER, 0, -sh * 6 / 100);
+    lv_obj_align(lbl_confirm, LV_ALIGN_TOP_MID, 0, sh * 5 / 100);
 
-    lv_obj_t *lbl_choice = make_label(pnl_confirm, 3, KID_COL_BLUE);
+    // NO is on the left and selected first, so a quick A A does not turn it off.
+    btn_no = make_panel(pnl_confirm, 130, 52);
+    lv_obj_set_style_shadow_opa(btn_no, LV_OPA_TRANSP, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_align(btn_no, LV_ALIGN_CENTER, -90, sh * 2 / 100);
+    lbl_no = make_label(btn_no, 3, KID_COL_BLUE);
+    lv_label_set_text(lbl_no, "NO");
+    lv_obj_center(lbl_no);
+
+    btn_yes = make_panel(pnl_confirm, 130, 52);
+    lv_obj_set_style_shadow_opa(btn_yes, LV_OPA_TRANSP, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_align(btn_yes, LV_ALIGN_CENTER, 90, sh * 2 / 100);
+    lbl_yes = make_label(btn_yes, 3, KID_COL_BLUE);
+    lv_label_set_text(lbl_yes, "YES");
+    lv_obj_center(lbl_yes);
+
+    lv_obj_t *lbl_choice = make_label(pnl_confirm, 2, KID_COL_BLUE);
     lv_label_set_recolor(lbl_choice, true);
-    lv_label_set_text(lbl_choice, "#78E650 A# YES    #78E650 B# NO");
-    lv_obj_align(lbl_choice, LV_ALIGN_CENTER, 0, sh * 8 / 100);
+    lv_label_set_text(lbl_choice, "#78E650 < ># PICK    #78E650 A# OK");
+    lv_obj_align(lbl_choice, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
     lv_obj_add_flag(pnl_confirm, LV_OBJ_FLAG_HIDDEN);
 
     // Message box in the same style, for "this game isn't set up" (any button closes it).
@@ -392,20 +438,52 @@ static void build_ui(void) {
     lv_obj_align(lbl_ok, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
     lv_obj_add_flag(pnl_msg, LV_OBJ_FLAG_HIDDEN);
 
+    // Low battery box: orange edge, battery picture, A closes it.
+    pnl_low = make_panel(ui_screen, sw * 66 / 100, sh * 46 / 100);
+    lv_obj_set_style_bg_opa(pnl_low, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(pnl_low, lv_color_hex(KID_COL_LOW), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(pnl_low, 5, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_center(pnl_low);
+
+    lv_obj_t *low_bat = kid_battery_create(pnl_low, 1);
+    lv_obj_align(low_bat, LV_ALIGN_TOP_MID, 14, sh * 4 / 100);
+    kid_battery_set(low_bat, 5, 0);
+
+    lv_obj_t *lbl_low = make_label(pnl_low, 4, KID_COL_LOW);
+    lv_label_set_text(lbl_low, "BATTERY LOW!");
+    lv_obj_align(lbl_low, LV_ALIGN_CENTER, 0, -sh * 2 / 100);
+
+    lv_obj_t *lbl_charge = make_label(pnl_low, 3, KID_COL_BLUE);
+    lv_label_set_text(lbl_charge, "PLEASE CHARGE");
+    lv_obj_align(lbl_charge, LV_ALIGN_CENTER, 0, sh * 7 / 100);
+
+    lv_obj_t *lbl_low_ok = make_label(pnl_low, 2, KID_COL_BLUE);
+    lv_label_set_recolor(lbl_low_ok, true);
+    lv_label_set_text(lbl_low_ok, "#78E650 A# OK");
+    lv_obj_align(lbl_low_ok, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
+    lv_obj_add_flag(pnl_low, LV_OBJ_FLAG_HIDDEN);
+
     kid_style_progress_bars();
 }
 
-static void show_msg(const char *text) {
+static void open_panel(lv_obj_t *panel) {
+    if (msg_open && msg_panel && msg_panel != panel) lv_obj_add_flag(msg_panel, LV_OBJ_FLAG_HIDDEN);
     msg_open = 1;
+    msg_panel = panel;
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(panel);
+}
+
+static void show_msg(const char *text) {
     lv_label_set_text(lbl_msg, text);
-    lv_obj_clear_flag(pnl_msg, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(pnl_msg);
+    open_panel(pnl_msg);
 }
 
 static int close_msg(void) {
     if (!msg_open) return 0;
     msg_open = 0;
-    lv_obj_add_flag(pnl_msg, LV_OBJ_FLAG_HIDDEN);
+    if (msg_panel) lv_obj_add_flag(msg_panel, LV_OBJ_FLAG_HIDDEN);
+    msg_panel = NULL;
     play_sound(snd_back);
     return 1;
 }
@@ -413,15 +491,32 @@ static int close_msg(void) {
 static void refresh_focus(void) {
     set_panel_focus(btn_power, power_focus);
     lv_obj_set_style_text_color(lbl_power, lv_color_hex(power_focus ? KID_COL_GREEN : KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+    for (uint32_t i = 0; i < lv_obj_get_child_cnt(arr_power); i++) {
+        lv_obj_set_style_bg_color(
+            lv_obj_get_child(arr_power, (int32_t) i), lv_color_hex(power_focus ? KID_COL_GREEN : KID_COL_BLUE),
+            MU_OBJ_MAIN_DEFAULT
+        );
+    }
 
     if (game_count > 0) set_panel_focus(tile[slot_cur], !power_focus);
     set_panel_focus(tile[slot_prev], 0);
     set_panel_focus(tile[slot_next], 0);
 }
 
+static void refresh_confirm(void) {
+    set_panel_focus(btn_no, !confirm_yes);
+    set_panel_focus(btn_yes, confirm_yes);
+    lv_obj_set_style_bg_opa(btn_no, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(btn_yes, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(lbl_no, lv_color_hex(confirm_yes ? KID_COL_BLUE : KID_COL_GREEN), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(lbl_yes, lv_color_hex(confirm_yes ? KID_COL_GREEN : KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+}
+
 static void show_confirm(const int show) {
     confirm_open = show;
     if (show) {
+        confirm_yes = 0;
+        refresh_confirm();
         lv_obj_clear_flag(pnl_confirm, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(pnl_confirm);
     } else {
@@ -477,6 +572,26 @@ static void rescan_task(lv_timer_t *timer) {
     }
 }
 
+// Keep the battery picture current, and say so (once, then every few minutes) when it runs low.
+static void kid_battery_task(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    kid_battery_set(bat_icon, kid_battery_percent(), kid_battery_charging());
+
+    if (!kid_battery_low()) {
+        low_warned = 0;
+        return;
+    }
+
+    const uint32_t now = SDL_GetTicks();
+    if (low_warned && now - low_warned_ms < KID_LOW_REPEAT_MS) return;
+    if (confirm_open || msg_open) return;
+
+    low_warned = 1;
+    low_warned_ms = now;
+    play_sound(snd_error);
+    open_panel(pnl_low);
+}
+
 static void kid_bright(const char *dir) {
     const char *args[] = {DEV_SCRIPT "bright.sh", dir, NULL};
     run_exec(args, A_SIZE(args), 1, 0, NULL, NULL);
@@ -504,7 +619,16 @@ static void handle_r2(void) {
 }
 
 static void move(const int dir) {
-    if (msg_open || confirm_open || power_focus || game_count <= 1) return;
+    if (msg_open) return;
+    if (confirm_open) {
+        if ((dir > 0) != confirm_yes) {
+            play_sound(snd_navigate);
+            confirm_yes = dir > 0;
+            refresh_confirm();
+        }
+        return;
+    }
+    if (power_focus || game_count <= 1) return;
     play_sound(snd_navigate);
     current_game = wrap_index(current_game + dir);
     refresh_carousel();
@@ -522,6 +646,11 @@ static void handle_a(void) {
     if (close_msg()) return;
 
     if (confirm_open) {
+        if (!confirm_yes) {
+            play_sound(snd_back);
+            show_confirm(0);
+            return;
+        }
         play_sound(snd_confirm);
         exit_status = 0;
         load_mux("shutdown");
@@ -608,11 +737,15 @@ int muxkid_main(void) {
     power_focus = 0;
     confirm_open = 0;
     msg_open = 0;
+    msg_panel = NULL;
+    confirm_yes = 0;
     last_bright_ms = 0;
     refresh_carousel();
     refresh_focus();
 
     lv_timer_t *rescan = game_count > 0 ? NULL : lv_timer_create(rescan_task, 2000, NULL);
+    lv_timer_t *bat_timer = lv_timer_create(kid_battery_task, KID_BAT_POLL_MS, NULL);
+    kid_battery_task(NULL);
 
     init_timer(ui_gen_refresh_task, NULL);
 
@@ -653,6 +786,7 @@ int muxkid_main(void) {
     mux_input_task(&input_opts);
 
     if (rescan && game_count == 0) lv_timer_del(rescan);
+    lv_timer_del(bat_timer);
 
     free(games);
     games = NULL;

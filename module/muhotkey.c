@@ -14,6 +14,7 @@
 #include <common/storage/fileio.h>
 #include <common/runtime/log.h>
 #include <common/config/config.h>
+#include <common/config/kidmode.h>
 #include <common/platform/device.h>
 #include <common/platform/board.h>
 #include <common/display/theme.h>
@@ -813,7 +814,18 @@ static void handle_idle(void) {
     }
 
     const uint32_t disp_timeout = config.settings.power.idle.display * 1000;
-    const uint32_t sleep_timeout = config.settings.power.idle.sleep * 1000;
+    uint32_t sleep_timeout = config.settings.power.idle.sleep * 1000;
+
+    // Kid mode sleeps after a fixed 3 minutes without input (not in parent mode).
+    static int kid_parent_cached = -1;
+    static uint32_t kid_parent_check = 0;
+    if (kid_mode_active()) {
+        if (kid_parent_cached < 0 || global_tick >= kid_parent_check) {
+            kid_parent_cached = file_exist(KID_PARENT_FILE);
+            kid_parent_check = global_tick + INHIBIT_CHECK_MS;
+        }
+        if (!kid_parent_cached) sleep_timeout = KID_IDLE_SLEEP_SECONDS * 1000;
+    }
 
     if (disp_timeout) check_idle(&idle_display, disp_timeout, 1);
     if (sleep_timeout) check_idle(&idle_sleep, sleep_timeout, !game_inhibit && !sleep_inhibit);

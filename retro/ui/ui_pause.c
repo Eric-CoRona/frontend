@@ -72,6 +72,8 @@ static uint32_t playtime_started = 0;
 static uint32_t playtime_shown = UINT32_MAX;
 static lv_obj_t *ui_img_speed_glyph = NULL;
 static lv_obj_t *ui_img_toast_glyph = NULL;
+static lv_obj_t *toast_panel = NULL; // the panel the current toast is using (theme toast or kid banner)
+static lv_obj_t *kid_low_panel = NULL;
 
 static int has_disc_control = 0;
 static int row_resume;
@@ -646,6 +648,8 @@ static void set_toast_glyph(const char *glyph) {
 void pause_menu_show_glyph_toast_timed(const char *msg, const char *glyph, const uint32_t duration_ms) {
     if (!ui_pnl_message || !ui_lbl_message) return;
 
+    if (toast_panel && toast_panel != ui_pnl_message) lv_obj_add_flag(toast_panel, LV_OBJ_FLAG_HIDDEN);
+    toast_panel = ui_pnl_message;
     set_toast_glyph(glyph);
     lv_label_set_text(ui_lbl_message, msg);
     lv_obj_clear_flag(ui_pnl_message, LV_OBJ_FLAG_HIDDEN);
@@ -679,7 +683,7 @@ void pause_menu_show_toast(const char *msg) {
 void pause_menu_clear_toast(void) {
     if (!toast_active) return;
 
-    lv_obj_add_flag(ui_pnl_message, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(toast_panel ? toast_panel : ui_pnl_message, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(ui_screen);
     toast_active = 0;
 }
@@ -688,7 +692,7 @@ static void pause_menu_toast_tick(const uint32_t now) {
     if (!toast_active) return;
     if (!SDL_TICKS_PASSED(now, toast_expire_tick)) return;
 
-    lv_obj_add_flag(ui_pnl_message, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(toast_panel ? toast_panel : ui_pnl_message, LV_OBJ_FLAG_HIDDEN);
     lv_obj_invalidate(ui_screen);
     toast_active = 0;
 }
@@ -769,12 +773,95 @@ static void pause_menu_header_fade_tick(const uint32_t now) {
     lv_obj_set_style_opa(ui_pnl_header, (lv_opa_t) (255 * elapsed / HEADER_FADE_MS), MU_OBJ_MAIN_DEFAULT);
 }
 
+// Kid mode: an orange "BATTERY LOW! / PLEASE CHARGE" banner across the top of the game.
+#define KID_LOW_POLL_MS   5000
+#define KID_LOW_SHOW_MS   5000
+#define KID_LOW_REPEAT_MS (5 * 60 * 1000)
+
+static void kid_low_build(void) {
+    const int sw = device.mux.width;
+    const int sh = device.mux.height;
+
+    kid_low_panel = lv_obj_create(ui_screen);
+    lv_obj_remove_style_all(kid_low_panel);
+    lv_obj_clear_flag(kid_low_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(kid_low_panel, sw * 62 / 100, 70);
+    lv_obj_align(kid_low_panel, LV_ALIGN_TOP_MID, 0, sh * 4 / 100);
+    lv_obj_set_style_bg_color(kid_low_panel, lv_color_hex(KID_COL_PANEL), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(kid_low_panel, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(kid_low_panel, lv_color_hex(KID_COL_LOW), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(kid_low_panel, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_color(kid_low_panel, lv_color_hex(KID_COL_SHADOW), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_ofs_x(kid_low_panel, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_ofs_y(kid_low_panel, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_opa(kid_low_panel, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+
+    lv_obj_t *bat = kid_battery_create(kid_low_panel, 1);
+    lv_obj_align(bat, LV_ALIGN_LEFT_MID, 14, 0);
+    kid_battery_set(bat, 5, 0);
+
+    lv_obj_t *title = lv_label_create(kid_low_panel);
+    lv_obj_set_style_text_font(title, kid_font(3), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(title, lv_color_hex(KID_COL_LOW), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_text(title, "BATTERY LOW!");
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 100, 6);
+
+    lv_obj_t *sub = lv_label_create(kid_low_panel);
+    lv_obj_set_style_text_font(sub, kid_font(2), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(sub, lv_color_hex(KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_text(sub, "PLEASE CHARGE");
+    lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 100, -8);
+
+    lv_obj_add_flag(kid_low_panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void kid_low_show(void) {
+    if (!kid_low_panel) return;
+
+    if (toast_panel && toast_panel != kid_low_panel) lv_obj_add_flag(toast_panel, LV_OBJ_FLAG_HIDDEN);
+    toast_panel = kid_low_panel;
+    lv_obj_clear_flag(kid_low_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(kid_low_panel);
+    toast_expire_tick = SDL_GetTicks() + KID_LOW_SHOW_MS;
+    toast_active = 1;
+
+    lv_obj_invalidate(ui_screen);
+    if (!active) {
+        display_set_ui_hidden(0);
+        const uint64_t present_before_refresh = display_present_serial();
+        lv_refr_now(NULL);
+        if (display_present_serial() == present_before_refresh) display_composite_frame();
+    }
+}
+
+static void kid_low_tick(const uint32_t now) {
+    static uint32_t next_poll;
+    static uint32_t warned_ms;
+    static int warned;
+
+    if (!kid_low_panel || !SDL_TICKS_PASSED(now, next_poll)) return;
+    next_poll = now + KID_LOW_POLL_MS;
+
+    if (!kid_battery_low()) {
+        warned = 0;
+        return;
+    }
+
+    if (active || toast_active) return;
+    if (warned && now - warned_ms < KID_LOW_REPEAT_MS) return;
+
+    warned = 1;
+    warned_ms = now;
+    kid_low_show();
+}
+
 void pause_menu_service_tick(const uint32_t now) {
     static uint32_t playtime_deadline;
     static uint32_t header_deadline;
     static int previous_active = -1;
 
     pause_menu_toast_tick(now);
+    kid_low_tick(now);
     pause_menu_menu_key_tick(now);
 
     if (active != previous_active || SDL_TICKS_PASSED(now, playtime_deadline)) {
@@ -1187,6 +1274,7 @@ void pause_menu_init(void) {
     if (kid_mode_active()) {
         kid_pause_build();
         kid_style_progress_bars();
+        kid_low_build();
     }
 
     set_chrome_visible(0);
@@ -1199,6 +1287,8 @@ void pause_menu_shutdown(void) {
         kid_timer = NULL;
     }
     kid_panel = NULL;
+    kid_low_panel = NULL;
+    toast_panel = NULL;
     kid_shown_index = -1;
     content_switch_free(&content_switch_items);
     ui_lbl_gb_slot = NULL;

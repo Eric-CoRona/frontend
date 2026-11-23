@@ -9,7 +9,7 @@ MODULES = muxactivity muxapp muxappcon muxprofile muxdetail muxarchive muxarc mu
           muxbtcon muxbtdev muxcolfilter muxcollect muxconfig muxconnect \
           muxcontrol muxcore muxcustom muxdanger muxdevice muxdistemp \
           muxgov muxhdmi muxhistory muxinfo muxinstall muxkiosk \
-          muxlanguage muxlaunch muxlink muxlogo muxnetadv muxnetprofile muxnetproxy muxnetscan \
+          muxkid muxlanguage muxlaunch muxlink muxlogo muxnetadv muxnetprofile muxnetproxy muxnetscan \
           muxnetwork muxnews muxoption muxorder muxoverlay muxpass muxpasscfg muxpicker muxplore \
           muxpower muxraopt muxrgb muxrgbzone muxrtc muxsearch muxshader muxshot muxsort \
           muxsoundfont muxspace muxsplash muxstorage muxtag muxtask muxtheme \

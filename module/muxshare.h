@@ -307,6 +307,8 @@ int muxinstall_main(void);
 
 int muxkiosk_main(void);
 
+int muxkid_main(void);
+
 int muxlanguage_main(void);
 
 int muxsoundfont_main(void);

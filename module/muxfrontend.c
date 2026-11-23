@@ -2,6 +2,7 @@
 #include <sys/prctl.h>
 
 #include "muxshare.h"
+#include <common/config/kidmode.h>
 #include <common/platform/battery.h>
 #include <common/storage/inotify.h>
 #include <common/storage/verify.h>
@@ -536,13 +537,36 @@ static void module_rtc(void) {
     }
 }
 
+// Kid mode: the picker replaces every menu until the parent combo is used (cleared on reboot).
+static int kid_picker_active(void) {
+    return kid_mode_active() && !file_exist(KID_PARENT_FILE) && !config.boot.factory_reset;
+}
+
+static void module_kid(void) {
+    config_auth = 0;
+    screen_clean = 0;
+    load_mux("kid");
+    if (muxkid_main() == 1) safe_quit(0);
+    set_previous_module("muxkid");
+}
+
+static int kid_passthrough(const char *action) {
+    static const char *allowed[] = {"reset", "reboot", "shutdown", "assign", "governor", "control",
+                                    "retroarch", "install", "installer", NULL};
+    for (int i = 0; allowed[i]; i++)
+        if (strcmp(action, allowed[i]) == 0) return 1;
+    return 0;
+}
+
 static void module_launcher(void) {
     config_auth = 0;
     exec_mux("launcher", "muxlaunch", muxlaunch_main);
 }
 
 static void module_start(void) {
-    if (config.boot.factory_reset) {
+    if (kid_picker_active()) {
+        module_kid();
+    } else if (config.boot.factory_reset) {
         exec_mux("installer", "muxinstall", muxinstall_main);
     } else {
         module_launcher();
@@ -676,6 +700,12 @@ static int module_dispatch(void) {
     if (!action) return 0;
 
     remove(MUOS_ACT_LOAD);
+
+    if (kid_picker_active() && !kid_passthrough(action)) {
+        free(action);
+        module_kid();
+        return 1;
+    }
 
     if (!dispatch_map_ready) dispatch_map_build();
     uint32_t slot = fnv_hash_str(action) & DISPATCH_MASK;

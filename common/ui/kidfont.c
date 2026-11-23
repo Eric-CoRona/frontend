@@ -226,7 +226,7 @@ void kid_style_background(lv_obj_t *obj) {
     lv_obj_add_event_cb(obj, kid_bg_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
 }
 
-static void kid_style_bar(lv_obj_t *panel, lv_obj_t *icon, lv_obj_t *bar) {
+static void kid_style_bar(lv_obj_t *panel, lv_obj_t *icon, lv_obj_t *bar, const uint32_t icon_col, const uint32_t bar_col) {
     if (panel) {
         lv_obj_set_style_radius(panel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_color(panel, lv_color_hex(KID_COL_PANEL), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -236,7 +236,7 @@ static void kid_style_bar(lv_obj_t *panel, lv_obj_t *icon, lv_obj_t *bar) {
         lv_obj_set_style_border_width(panel, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
     }
     if (icon) {
-        lv_obj_set_style_img_recolor(icon, lv_color_hex(KID_COL_BLUE), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_img_recolor(icon, lv_color_hex(icon_col), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     }
     if (bar) {
@@ -244,15 +244,18 @@ static void kid_style_bar(lv_obj_t *panel, lv_obj_t *icon, lv_obj_t *bar) {
         lv_obj_set_style_radius(bar, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_color(bar, lv_color_hex(KID_COL_SHADOW), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_bg_color(bar, lv_color_hex(KID_COL_GREEN), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(bar_col), LV_PART_INDICATOR | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_NONE, LV_PART_INDICATOR | LV_STATE_DEFAULT);
     }
 }
 
+// Brightness and volume use opposite colours so they are easy to tell apart.
 void kid_style_progress_bars(void) {
-    kid_style_bar(ui_pnl_progress_brightness, ui_ico_progress_brightness, ui_bar_progress_brightness);
-    kid_style_bar(ui_pnl_progress_volume, ui_ico_progress_volume, ui_bar_progress_volume);
+    kid_style_bar(
+        ui_pnl_progress_brightness, ui_ico_progress_brightness, ui_bar_progress_brightness, KID_COL_GREEN, KID_COL_BLUE
+    );
+    kid_style_bar(ui_pnl_progress_volume, ui_ico_progress_volume, ui_bar_progress_volume, KID_COL_BLUE, KID_COL_GREEN);
 }
 
 // ---- Pixel battery ----------------------------------------------------------------------

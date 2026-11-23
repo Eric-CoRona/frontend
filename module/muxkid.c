@@ -34,6 +34,14 @@ enum { slot_prev, slot_cur, slot_next, slot_count };
 static lv_obj_t *tile[slot_count];
 static lv_obj_t *tile_img[slot_count];
 static lv_obj_t *tile_lbl[slot_count];
+static int tile_game[slot_count]; // game loaded into each tile object (-1 = none), so a slide reuses it
+
+#define KID_SLIDE_MS 170
+static int tile_y;
+static int tile_x[slot_count];
+static int slide_from_x[slot_count], slide_from_w[slot_count], slide_from_h[slot_count];
+static int slide_running;
+static int slide_var; // animation handle (address only)
 static lv_obj_t *lbl_name;
 static lv_obj_t *lbl_count;
 static lv_obj_t *lbl_empty;
@@ -199,13 +207,45 @@ static int wrap_index(const int i) {
     return ((i % game_count) + game_count) % game_count;
 }
 
-static void fill_tile(const int slot, const int index, const int w, const int h) {
+static int tile_w[slot_count];
+static int tile_h[slot_count];
+
+// Covers are always loaded at the middle tile's size; side tiles show them zoomed down,
+// so a tile can slide between positions without reloading its picture.
+static void place_tile(const int slot, const int x, const int w, const int h) {
+    lv_obj_set_size(tile[slot], w, h);
+    lv_obj_align(tile[slot], LV_ALIGN_CENTER, x, tile_y);
+    const int zoom = LV_IMG_ZOOM_NONE * w / tile_w[slot_cur];
+    lv_img_set_zoom(tile_img[slot], (uint16_t) (zoom > 0 ? zoom : 1));
+}
+
+// Loading a cover resets its zoom to 100%; put the side tiles' zoom back once it lands.
+static void zoom_fix_task(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    if (slide_running) return;
+    for (int i = 0; i < slot_count; i++) {
+        const int zoom = LV_IMG_ZOOM_NONE * lv_obj_get_width(tile[i]) / tile_w[slot_cur];
+        if (lv_img_get_zoom(tile_img[i]) != zoom) lv_img_set_zoom(tile_img[i], (uint16_t) (zoom > 0 ? zoom : 1));
+    }
+}
+
+static void fill_tile(const int slot, const int index) {
     const int visible = game_count > 0 && (slot == slot_cur || game_count > 2 || (game_count == 2 && slot == slot_next));
     if (!visible) {
         lv_obj_add_flag(tile[slot], LV_OBJ_FLAG_HIDDEN);
         return;
     }
     lv_obj_clear_flag(tile[slot], LV_OBJ_FLAG_HIDDEN);
+
+    // Name tile text: bigger in the middle.
+    const int cur = slot == slot_cur;
+    lv_obj_set_style_text_font(tile_lbl[slot], kid_font(cur ? 3 : 2), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_line_space(tile_lbl[slot], cur ? 6 : 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(tile_lbl[slot], lv_color_hex(cur ? KID_COL_GREEN : KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_width(tile_lbl[slot], tile_w[slot] - 24);
+
+    if (tile_game[slot] == index) return;
+    tile_game[slot] = index;
 
     const kid_game *g = &games[index];
     char art[PATH_MAX];
@@ -215,7 +255,7 @@ static void fill_tile(const int slot, const int index, const int w, const int h)
         lv_obj_clear_flag(tile_img[slot], LV_OBJ_FLAG_HIDDEN);
 
         const struct image_settings settings = {
-            art, LV_ALIGN_CENTER, (int16_t) (w - 8), (int16_t) (h - 8), 0, 0, 0, 0
+            art, LV_ALIGN_CENTER, (int16_t) (tile_w[slot_cur] - 8), (int16_t) (tile_h[slot_cur] - 8), 0, 0, 0, 0
         };
         update_image(tile_img[slot], settings);
     } else {
@@ -226,8 +266,6 @@ static void fill_tile(const int slot, const int index, const int w, const int h)
     }
 }
 
-static int tile_w[slot_count];
-static int tile_h[slot_count];
 
 // Game names get two lines. Big letters when the name fits in two lines,
 // a size smaller when it doesn't, and "..." only if it is still too long.
@@ -258,9 +296,9 @@ static void refresh_carousel(void) {
         return;
     }
 
-    fill_tile(slot_prev, wrap_index(current_game - 1), tile_w[slot_prev], tile_h[slot_prev]);
-    fill_tile(slot_cur, current_game, tile_w[slot_cur], tile_h[slot_cur]);
-    fill_tile(slot_next, wrap_index(current_game + 1), tile_w[slot_next], tile_h[slot_next]);
+    fill_tile(slot_prev, wrap_index(current_game - 1));
+    fill_tile(slot_cur, current_game);
+    fill_tile(slot_next, wrap_index(current_game + 1));
 
     set_name_text(games[current_game].name);
 
@@ -347,11 +385,15 @@ static void build_ui(void) {
 
     const int y = -sh * 7 / 100;
     const int side_x = sw * 36 / 100;
-    const int xs[slot_count] = {-side_x, 0, side_x};
+    tile_y = y;
+    tile_x[slot_prev] = -side_x;
+    tile_x[slot_cur] = 0;
+    tile_x[slot_next] = side_x;
 
     for (int s = 0; s < slot_count; s++) {
+        tile_game[s] = -1;
         tile[s] = make_panel(ui_screen, tile_w[s], tile_h[s]);
-        lv_obj_align(tile[s], LV_ALIGN_CENTER, xs[s], y);
+        lv_obj_align(tile[s], LV_ALIGN_CENTER, tile_x[s], y);
         lv_obj_set_style_clip_corner(tile[s], true, MU_OBJ_MAIN_DEFAULT);
 
         // Sized to the picture itself: a larger image object makes LVGL tile (repeat) the cover.
@@ -364,6 +406,7 @@ static void build_ui(void) {
         lv_obj_set_width(tile_lbl[s], tile_w[s] - 24);
         lv_label_set_long_mode(tile_lbl[s], LV_LABEL_LONG_WRAP);
         lv_obj_center(tile_lbl[s]);
+        place_tile(s, tile_x[s], tile_w[s], tile_h[s]);
     }
 
     // Game name under the middle tile: up to two lines of large text.
@@ -608,7 +651,8 @@ static int bright_ready(void) {
 static void handle_l2(void) {
     if (!bright_ready()) return;
     const int step = config.settings.advanced.inc_bright > 0 ? config.settings.advanced.inc_bright : 16;
-    if (current_brightness >= step * 2) kid_bright("D");
+    const char *arg = kid_dim_arg(current_brightness, step);
+    if (arg) kid_bright(arg);
     ui_common_handle_bright_down();
 }
 
@@ -616,6 +660,43 @@ static void handle_r2(void) {
     if (!bright_ready()) return;
     kid_bright("U");
     ui_common_handle_bright_up();
+}
+
+static void slide_step(void *var, const int32_t v) {
+    LV_UNUSED(var);
+    for (int i = 0; i < slot_count; i++) {
+        const int x = slide_from_x[i] + (tile_x[i] - slide_from_x[i]) * v / 256;
+        const int w = slide_from_w[i] + (tile_w[i] - slide_from_w[i]) * v / 256;
+        const int h = slide_from_h[i] + (tile_h[i] - slide_from_h[i]) * v / 256;
+        place_tile(i, x, w, h);
+    }
+}
+
+static void slide_done(lv_anim_t *a) {
+    LV_UNUSED(a);
+    slide_running = 0;
+}
+
+static void slide_start(void) {
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, &slide_var);
+    lv_anim_set_exec_cb(&a, slide_step);
+    lv_anim_set_values(&a, 0, 256);
+    lv_anim_set_time(&a, KID_SLIDE_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_ready_cb(&a, slide_done);
+    slide_running = 1;
+    slide_step(NULL, 0);
+    lv_anim_start(&a);
+}
+
+// A new press while still sliding: jump the last slide to its end first.
+static void slide_finish(void) {
+    if (!slide_running) return;
+    lv_anim_del(&slide_var, NULL);
+    slide_step(NULL, 256);
+    slide_running = 0;
 }
 
 static void move(const int dir) {
@@ -630,8 +711,57 @@ static void move(const int dir) {
     }
     if (power_focus || game_count <= 1) return;
     play_sound(snd_navigate);
+
+    if (game_count < 3) {
+        current_game = wrap_index(current_game + dir);
+        for (int i = 0; i < slot_count; i++) tile_game[i] = -1;
+        refresh_carousel();
+        refresh_focus();
+        return;
+    }
+
+    slide_finish();
+
+    // Rotate the three tile objects one place so the pictures already loaded slide along;
+    // only the tile coming in at the edge loads a new game.
+    lv_obj_t *t = tile[0], *ti = tile_img[0], *tl = tile_lbl[0];
+    int tg = tile_game[0];
+    int from[slot_count];
+    if (dir > 0) {
+        tile[0] = tile[1], tile_img[0] = tile_img[1], tile_lbl[0] = tile_lbl[1], tile_game[0] = tile_game[1];
+        tile[1] = tile[2], tile_img[1] = tile_img[2], tile_lbl[1] = tile_lbl[2], tile_game[1] = tile_game[2];
+        tile[2] = t, tile_img[2] = ti, tile_lbl[2] = tl, tile_game[2] = tg;
+        from[slot_prev] = slot_cur;
+        from[slot_cur] = slot_next;
+        from[slot_next] = -1;
+    } else {
+        t = tile[2], ti = tile_img[2], tl = tile_lbl[2], tg = tile_game[2];
+        tile[2] = tile[1], tile_img[2] = tile_img[1], tile_lbl[2] = tile_lbl[1], tile_game[2] = tile_game[1];
+        tile[1] = tile[0], tile_img[1] = tile_img[0], tile_lbl[1] = tile_lbl[0], tile_game[1] = tile_game[0];
+        tile[0] = t, tile_img[0] = ti, tile_lbl[0] = tl, tile_game[0] = tg;
+        from[slot_prev] = -1;
+        from[slot_cur] = slot_prev;
+        from[slot_next] = slot_cur;
+    }
+
+    for (int i = 0; i < slot_count; i++) {
+        if (from[i] >= 0) {
+            slide_from_x[i] = tile_x[from[i]];
+            slide_from_w[i] = tile_w[from[i]];
+            slide_from_h[i] = tile_h[from[i]];
+        } else {
+            // The new tile comes in from just past its edge.
+            slide_from_x[i] = tile_x[i] * 2;
+            slide_from_w[i] = tile_w[i];
+            slide_from_h[i] = tile_h[i];
+        }
+    }
+
     current_game = wrap_index(current_game + dir);
     refresh_carousel();
+    refresh_focus();
+    lv_obj_move_foreground(tile[slot_cur]);
+    slide_start();
 }
 
 static void handle_left(void) {
@@ -739,12 +869,14 @@ int muxkid_main(void) {
     msg_open = 0;
     msg_panel = NULL;
     confirm_yes = 0;
+    slide_running = 0;
     last_bright_ms = 0;
     refresh_carousel();
     refresh_focus();
 
     lv_timer_t *rescan = game_count > 0 ? NULL : lv_timer_create(rescan_task, 2000, NULL);
     lv_timer_t *bat_timer = lv_timer_create(kid_battery_task, KID_BAT_POLL_MS, NULL);
+    lv_timer_t *zoom_timer = lv_timer_create(zoom_fix_task, 30, NULL);
     kid_battery_task(NULL);
 
     init_timer(ui_gen_refresh_task, NULL);
@@ -787,6 +919,9 @@ int muxkid_main(void) {
 
     if (rescan && game_count == 0) lv_timer_del(rescan);
     lv_timer_del(bat_timer);
+    lv_timer_del(zoom_timer);
+    lv_anim_del(&slide_var, NULL);
+    slide_running = 0;
 
     free(games);
     games = NULL;

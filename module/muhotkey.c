@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <signal.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -305,6 +306,20 @@ static int combo_allowed(const combo_config *c) {
     if (c->is_normal_mode && config.boot.factory_reset != 0) {
         if (verbose) LOG_INFO("input", "Skipped %s (restricted by mode)", c->name);
         return 0;
+    }
+
+    // Kid mode: no emergency reboot / power off / kill-game combos (Start or Select + L2 + R2
+    // is too easy to hit while changing brightness). Parent mode keeps them.
+    if (kid_mode_active() && !file_exist(KID_PARENT_FILE)) {
+        int emergency = c->name && strncasecmp(c->name, "OSF", 3) == 0;
+        for (size_t i = 0; !emergency && i < c->exec_argc; i++) {
+            const char *a = c->exec_argv[i];
+            if (a && (strstr(a, "proc_die") || strcmp(a, "osf") == 0)) emergency = 1;
+        }
+        if (emergency) {
+            LOG_INFO("input", "Skipped %s (kid mode)", c->name ? c->name : "combo");
+            return 0;
+        }
     }
 
     return 1;

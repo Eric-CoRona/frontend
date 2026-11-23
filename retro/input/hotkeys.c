@@ -530,8 +530,9 @@ void hotkeys_volume_bright_task(void) {
         // level. Run it here, and never dim below one step so the screen can't go black.
         if (nav_repeat_step(&rpt_kid_bright_down, l2_now && !prev_kid_l2, l2_now, 1, now)) {
             const int step = config.settings.advanced.inc_bright > 0 ? config.settings.advanced.inc_bright : 16;
-            // bright.sh D drops one step; stop while at least one step remains above zero.
-            if (current_brightness >= step * 2) kid_run_bright("D");
+            // One step down, ending at muOS's safe minimum rather than black.
+            const char *arg = kid_dim_arg(current_brightness, step);
+            if (arg) kid_run_bright(arg);
             ui_common_handle_bright_down();
         }
         if (nav_repeat_step(&rpt_kid_bright_up, r2_now && !prev_kid_r2, r2_now, 1, now)) {

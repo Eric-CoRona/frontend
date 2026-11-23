@@ -278,12 +278,6 @@ static void build_ui(void) {
     const int sw = device.mux.width;
     const int sh = device.mux.height;
 
-    // Title, top left: the logo's words in their colours.
-    lv_obj_t *title = make_label(ui_screen, 3, KID_COL_GREEN);
-    lv_label_set_recolor(title, true);
-    lv_label_set_text(title, "THEO'S #8CD2FF GAMEBOY#");
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, sw * 4 / 100, sh * 6 / 100);
-
     // Shut Down button, top right. Up selects it, A asks to confirm.
     btn_power = make_panel(ui_screen, 9 * 6 * 2 + 28, 7 * 2 + 22);
     lv_obj_align(btn_power, LV_ALIGN_TOP_RIGHT, -sw * 4 / 100, sh * 4 / 100);

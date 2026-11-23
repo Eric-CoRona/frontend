@@ -54,13 +54,14 @@ for y in range(0,H,3):
         r,g,b=px_[x,y]; px_[x,y]=(int(r*.93),int(g*.93),int(b*.93))
 import sys
 t1=sys.argv[1] if len(sys.argv)>1 else "THEO'S"
-t2=sys.argv[2] if len(sys.argv)>2 else "GAMEBOY"
+t2=sys.argv[2] if len(sys.argv)>2 else "GAMEBOY"  # "" for a single framed line
 OUTFILE=sys.argv[3] if len(sys.argv)>3 else 'bootlogo.png'
 p1=max([p for p in range(6,17) if text_w(t1,p)<=520] or [6])
-p2=min(9,max([p for p in range(4,10) if text_w(t2,p)<=480] or [4]))
+p2=min(9,max([p for p in range(4,10) if text_w(t2,p)<=480] or [4])) if t2 else 1
 w1,w2=text_w(t1,p1),text_w(t2,p2)
 h1,h2=7*p1,7*p2
 gap=44
+if not t2: h2=0; gap=0
 total=h1+gap+h2
 y1=(H-total)//2-10; y2=y1+h1+gap
 x1=(W-w1)//2; x2=(W-w2)//2
@@ -68,6 +69,7 @@ x1=(W-w1)//2; x2=(W-w2)//2
 G=4; pad=40
 boxA=(x1-pad, y1-pad, x1+w1+pad, y1+h1+gap//2)
 boxB=(x2-pad, y1+h1+gap//2, x2+w2+pad, y2+h2+pad)
+if not t2: boxA=(x1-pad, y1-pad, x1+w1+pad, y1+h1+pad); boxB=boxA
 def inside(px,py):
     for (a,b,c,e) in (boxA,boxB):
         if a<=px<c and b<=py<e: return True
@@ -100,7 +102,7 @@ for cy in range(1,rows-1):
             if any(border(cx+dx,cy+dy) for dx,dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))):
                 pass
 draw_text(d,t1,x1,y1,p1,GREEN,SH,6)
-draw_text(d,t2,x2,y2,p2,BLUE,SH,4)
+if t2: draw_text(d,t2,x2,y2,p2,BLUE,SH,4)
 dy_=boxB[3]+34; s_=8
 for i,col in enumerate((GREEN,OUT,BLUE)):
     X=W//2-(3*s_+2*s_)//2+i*2*s_

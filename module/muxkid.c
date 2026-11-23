@@ -211,6 +211,25 @@ static void fill_tile(const int slot, const int index, const int w, const int h)
 static int tile_w[slot_count];
 static int tile_h[slot_count];
 
+// Game names get two lines. Big letters when the name fits in two lines,
+// a size smaller when it doesn't, and "..." only if it is still too long.
+static void set_name_text(const char *name) {
+    const lv_coord_t w = lv_obj_get_width(lbl_name);
+    int scale = 4;
+
+    for (; scale > 3; scale--) {
+        lv_point_t size;
+        lv_txt_get_size(&size, name, kid_font(scale), 0, scale * 2, w, LV_TEXT_FLAG_NONE);
+        if (size.y <= kid_font(scale)->line_height * 2 + scale * 2) break;
+    }
+
+    const lv_font_t *f = kid_font(scale);
+    lv_obj_set_style_text_font(lbl_name, f, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_line_space(lbl_name, scale * 2, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_height(lbl_name, f->line_height * 2 + scale * 2);
+    lv_label_set_text(lbl_name, name);
+}
+
 static void refresh_carousel(void) {
     if (game_count <= 0) {
         for (int s = 0; s < slot_count; s++)
@@ -225,7 +244,7 @@ static void refresh_carousel(void) {
     fill_tile(slot_cur, current_game, tile_w[slot_cur], tile_h[slot_cur]);
     fill_tile(slot_next, wrap_index(current_game + 1), tile_w[slot_next], tile_h[slot_next]);
 
-    lv_label_set_text(lbl_name, games[current_game].name);
+    set_name_text(games[current_game].name);
 
     char count[32];
     snprintf(count, sizeof(count), "%d / %d", current_game + 1, game_count);
@@ -285,12 +304,12 @@ static void build_ui(void) {
     lv_label_set_text(lbl_power, "SHUT DOWN");
     lv_obj_center(lbl_power);
 
-    tile_w[slot_cur] = sw * 40 / 100;
-    tile_h[slot_cur] = sh * 48 / 100;
+    tile_w[slot_cur] = sw * 38 / 100;
+    tile_h[slot_cur] = sh * 44 / 100;
     tile_w[slot_prev] = tile_w[slot_next] = sw * 22 / 100;
-    tile_h[slot_prev] = tile_h[slot_next] = sh * 32 / 100;
+    tile_h[slot_prev] = tile_h[slot_next] = sh * 30 / 100;
 
-    const int y = -sh * 3 / 100;
+    const int y = -sh * 7 / 100;
     const int side_x = sw * 36 / 100;
     const int xs[slot_count] = {-side_x, 0, side_x};
 
@@ -299,8 +318,10 @@ static void build_ui(void) {
         lv_obj_align(tile[s], LV_ALIGN_CENTER, xs[s], y);
         lv_obj_set_style_clip_corner(tile[s], true, MU_OBJ_MAIN_DEFAULT);
 
+        // Sized to the picture itself: a larger image object makes LVGL tile (repeat) the cover.
         tile_img[s] = lv_img_create(tile[s]);
-        lv_obj_set_size(tile_img[s], tile_w[s], tile_h[s]);
+        lv_img_set_src(tile_img[s], &ui_img_blank);
+        lv_obj_set_size(tile_img[s], LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_center(tile_img[s]);
 
         tile_lbl[s] = make_label(tile[s], s == slot_cur ? 3 : 2, s == slot_cur ? KID_COL_GREEN : KID_COL_BLUE);
@@ -309,14 +330,15 @@ static void build_ui(void) {
         lv_obj_center(tile_lbl[s]);
     }
 
-    // Game name under the middle tile, large.
+    // Game name under the middle tile: up to two lines of large text.
     lbl_name = make_label(ui_screen, 4, KID_COL_WHITE);
     lv_obj_set_width(lbl_name, sw - sw * 8 / 100);
     lv_label_set_long_mode(lbl_name, LV_LABEL_LONG_DOT);
-    lv_obj_align(lbl_name, LV_ALIGN_CENTER, 0, y + tile_h[slot_cur] / 2 + sh * 8 / 100);
+    lv_obj_align(lbl_name, LV_ALIGN_TOP_MID, 0, sh / 2 + y + tile_h[slot_cur] / 2 + sh * 3 / 100);
 
+    // The "2 / 5" counter is kept for the empty-state logic but not shown.
     lbl_count = make_label(ui_screen, 2, KID_COL_SEA);
-    lv_obj_align(lbl_count, LV_ALIGN_CENTER, 0, y + tile_h[slot_cur] / 2 + sh * 16 / 100);
+    lv_obj_add_flag(lbl_count, LV_OBJ_FLAG_HIDDEN);
 
     // Button hint along the bottom.
     lv_obj_t *hint = make_label(ui_screen, 2, KID_COL_BLUE);
@@ -398,7 +420,6 @@ static void rescan_task(lv_timer_t *timer) {
     if (game_count > 0) {
         lv_obj_add_flag(lbl_empty, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lbl_name, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(lbl_count, LV_OBJ_FLAG_HIDDEN);
         refresh_carousel();
         refresh_focus();
         lv_timer_del(timer);

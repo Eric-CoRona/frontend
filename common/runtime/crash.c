@@ -1,3 +1,4 @@
+#include <common/config/kidmode.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
@@ -190,6 +191,9 @@ void power_loss_ui_check(struct theme_config *t, const struct mux_lang *l, lv_ob
     remove(MUOS_PWR_LOSS);
 
     increment_counter_file(CONF_CONFIG_PATH "count/power_loss");
+
+    // Kid mode: still counted, but no warning box for a child to puzzle over.
+    if (kid_mode_active()) return;
 
     dialogue_init_message(
         &power_loss_dlg, t, layer, l->generic.power_loss_title, NULL, l->generic.power_loss_message,

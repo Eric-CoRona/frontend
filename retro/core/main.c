@@ -1011,7 +1011,10 @@ int main(const int argc, char *argv[]) {
     uint32_t fps_frame_count = 0;
     uint32_t fps_last_update = SDL_GetTicks();
 
-    uint32_t sram_flush_deadline = SDL_GetTicks() + (uint32_t) session_settings.sram_flush_seconds * 1000;
+    // Kid mode: in-game saves reach the card within 10 s, so a hard power-off loses little.
+    // Writes only happen when the save actually changed.
+    const int sram_flush_seconds = kid_mode_active() ? KID_SRAM_FLUSH_SECONDS : session_settings.sram_flush_seconds;
+    uint32_t sram_flush_deadline = SDL_GetTicks() + (uint32_t) sram_flush_seconds * 1000;
     uint32_t status_deadline = SDL_GetTicks() + TIMER_STATUS;
 
     uint32_t timeline_deadline = 0;
@@ -1090,11 +1093,11 @@ int main(const int argc, char *argv[]) {
             status_deadline = loop_now + TIMER_STATUS;
         }
 
-        if (session_settings.sram_flush_seconds > 0 && loop_now >= sram_flush_deadline) {
+        if (sram_flush_seconds > 0 && loop_now >= sram_flush_deadline) {
             const uint64_t persistent_start = perf_begin();
             persistent_memory_save();
             perf_end(perf_stage_service_persistent, persistent_start);
-            sram_flush_deadline = loop_now + (uint32_t) session_settings.sram_flush_seconds * 1000;
+            sram_flush_deadline = loop_now + (uint32_t) sram_flush_seconds * 1000;
         }
 
         const int paused = pause_menu_is_active();

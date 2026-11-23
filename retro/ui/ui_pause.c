@@ -1179,7 +1179,10 @@ void pause_menu_init(void) {
     lv_obj_set_user_data(ui_screen, mux_module);
     lv_label_set_text(ui_lbl_datetime, get_datetime());
 
-    if (kid_mode_active()) kid_pause_build();
+    if (kid_mode_active()) {
+        kid_pause_build();
+        kid_style_progress_bars();
+    }
 
     set_chrome_visible(0);
     fade_in_instant();

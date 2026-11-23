@@ -19,3 +19,6 @@ const lv_font_t *kid_font(int scale);
 
 // Paints the boot-screen background (navy to teal gradient with a faint pixel dot grid) on obj.
 void kid_style_background(lv_obj_t *obj);
+
+// Restyles the brightness and volume pop-up bars (square, navy panel, green fill).
+void kid_style_progress_bars(void);

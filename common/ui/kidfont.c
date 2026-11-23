@@ -1,5 +1,6 @@
 #include <string.h>
 #include <common/ui/kidfont.h>
+#include <common/ui/common.h>
 
 #define KID_GLYPH_W 5
 #define KID_GLYPH_H 7
@@ -106,7 +107,19 @@ static const uint8_t kid_glyphs[95][KID_GLYPH_H] = {
 static lv_font_t kid_fonts[KID_MAX_SCALE + 1];
 static uint8_t kid_bitmap[KID_GLYPH_W * KID_MAX_SCALE * KID_GLYPH_H * KID_MAX_SCALE];
 
+// Accented Latin letters (U+00C0..U+00FF) drawn as their plain letter, so "Pokémon" reads POKEMON.
+static uint32_t fold_accent(const uint32_t c) {
+    static const char latin1[] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo/ouuuuypy";
+    if (c >= 0xC0 && c <= 0xFF) return (uint32_t) (unsigned char) latin1[c - 0xC0];
+    if (c == 0x2018 || c == 0x2019) return '\'';
+    if (c == 0x201C || c == 0x201D) return '"';
+    if (c == 0x2013 || c == 0x2014) return '-';
+    if (c == 0x2026) return '.';
+    return c;
+}
+
 static int glyph_index(uint32_t letter) {
+    letter = fold_accent(letter);
     if (letter >= 'a' && letter <= 'z') letter -= 'a' - 'A';
     if (letter < 32 || letter > 126) return '?' - 32;
     return (int) letter - 32;
@@ -201,4 +214,33 @@ void kid_style_background(lv_obj_t *obj) {
     lv_obj_set_style_bg_grad_dir(obj, LV_GRAD_DIR_VER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_add_event_cb(obj, kid_bg_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
+}
+
+static void kid_style_bar(lv_obj_t *panel, lv_obj_t *icon, lv_obj_t *bar) {
+    if (panel) {
+        lv_obj_set_style_radius(panel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_color(panel, lv_color_hex(KID_COL_PANEL), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_color(panel, lv_color_hex(KID_COL_SEA), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_opa(panel, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(panel, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (icon) {
+        lv_obj_set_style_img_recolor(icon, lv_color_hex(KID_COL_BLUE), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    if (bar) {
+        lv_obj_set_style_radius(bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_radius(bar, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(KID_COL_SHADOW), LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(KID_COL_GREEN), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_NONE, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    }
+}
+
+void kid_style_progress_bars(void) {
+    kid_style_bar(ui_pnl_progress_brightness, ui_ico_progress_brightness, ui_bar_progress_brightness);
+    kid_style_bar(ui_pnl_progress_volume, ui_ico_progress_volume, ui_bar_progress_volume);
 }

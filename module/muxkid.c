@@ -39,8 +39,13 @@ static lv_obj_t *btn_power;
 static lv_obj_t *lbl_power;
 static lv_obj_t *pnl_confirm;
 
+static lv_obj_t *pnl_msg;
+static lv_obj_t *lbl_msg;
+
 static int power_focus;
 static int confirm_open;
+static int msg_open;
+static uint32_t last_bright_ms;
 
 static int has_ext(const char *name, const char *ext) {
     const char *dot = strrchr(name, '.');
@@ -368,6 +373,41 @@ static void build_ui(void) {
     lv_label_set_text(lbl_choice, "#78E650 A# YES    #78E650 B# NO");
     lv_obj_align(lbl_choice, LV_ALIGN_CENTER, 0, sh * 8 / 100);
     lv_obj_add_flag(pnl_confirm, LV_OBJ_FLAG_HIDDEN);
+
+    // Message box in the same style, for "this game isn't set up" (any button closes it).
+    pnl_msg = make_panel(ui_screen, sw * 76 / 100, sh * 42 / 100);
+    lv_obj_set_style_bg_opa(pnl_msg, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(pnl_msg, lv_color_hex(KID_COL_GREEN), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(pnl_msg, 5, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_center(pnl_msg);
+
+    lbl_msg = make_label(pnl_msg, 3, KID_COL_GREEN);
+    lv_obj_set_width(lbl_msg, sw * 68 / 100);
+    lv_label_set_long_mode(lbl_msg, LV_LABEL_LONG_WRAP);
+    lv_obj_align(lbl_msg, LV_ALIGN_CENTER, 0, -sh * 4 / 100);
+
+    lv_obj_t *lbl_ok = make_label(pnl_msg, 3, KID_COL_BLUE);
+    lv_label_set_recolor(lbl_ok, true);
+    lv_label_set_text(lbl_ok, "#78E650 A#  OK");
+    lv_obj_align(lbl_ok, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
+    lv_obj_add_flag(pnl_msg, LV_OBJ_FLAG_HIDDEN);
+
+    kid_style_progress_bars();
+}
+
+static void show_msg(const char *text) {
+    msg_open = 1;
+    lv_label_set_text(lbl_msg, text);
+    lv_obj_clear_flag(pnl_msg, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(pnl_msg);
+}
+
+static int close_msg(void) {
+    if (!msg_open) return 0;
+    msg_open = 0;
+    lv_obj_add_flag(pnl_msg, LV_OBJ_FLAG_HIDDEN);
+    play_sound(snd_back);
+    return 1;
 }
 
 static void refresh_focus(void) {
@@ -390,23 +430,34 @@ static void show_confirm(const int show) {
 }
 
 static void handle_up(void) {
-    if (confirm_open || power_focus) return;
+    if (msg_open || confirm_open || power_focus) return;
     play_sound(snd_navigate);
     power_focus = 1;
     refresh_focus();
 }
 
 static void handle_down(void) {
-    if (confirm_open || !power_focus) return;
+    if (msg_open || confirm_open || !power_focus) return;
     play_sound(snd_navigate);
     power_focus = 0;
     refresh_focus();
 }
 
 static void handle_b(void) {
-    if (!confirm_open) return;
-    play_sound(snd_back);
-    show_confirm(0);
+    if (close_msg()) return;
+
+    if (confirm_open) {
+        play_sound(snd_back);
+        show_confirm(0);
+        return;
+    }
+
+    // B on the Shut Down button goes back to the games.
+    if (power_focus) {
+        play_sound(snd_back);
+        power_focus = 0;
+        refresh_focus();
+    }
 }
 
 // The SD card can still be mounting at boot: look again while the list is empty.
@@ -431,19 +482,29 @@ static void kid_bright(const char *dir) {
     run_exec(args, A_SIZE(args), 1, 0, NULL, NULL);
 }
 
+// Holding L2/R2 repeats quickly; space the brightness steps out so each one lands.
+static int bright_ready(void) {
+    const uint32_t now = SDL_GetTicks();
+    if (now - last_bright_ms < 150) return 0;
+    last_bright_ms = now;
+    return 1;
+}
+
 static void handle_l2(void) {
+    if (!bright_ready()) return;
     const int step = config.settings.advanced.inc_bright > 0 ? config.settings.advanced.inc_bright : 16;
     if (current_brightness >= step * 2) kid_bright("D");
     ui_common_handle_bright_down();
 }
 
 static void handle_r2(void) {
+    if (!bright_ready()) return;
     kid_bright("U");
     ui_common_handle_bright_up();
 }
 
 static void move(const int dir) {
-    if (confirm_open || power_focus || game_count <= 1) return;
+    if (msg_open || confirm_open || power_focus || game_count <= 1) return;
     play_sound(snd_navigate);
     current_game = wrap_index(current_game + dir);
     refresh_carousel();
@@ -458,6 +519,8 @@ static void handle_right(void) {
 }
 
 static void handle_a(void) {
+    if (close_msg()) return;
+
     if (confirm_open) {
         play_sound(snd_confirm);
         exit_status = 0;
@@ -482,7 +545,7 @@ static void handle_a(void) {
 
     if (!load_content(0, launch_path)) {
         play_sound(snd_error);
-        toast_message("This game isn't ready yet. Ask Dad!", tst_wait_m);
+        show_msg("THIS GAME ISN'T READY YET.\nASK DAD!");
         return;
     }
 
@@ -544,6 +607,8 @@ int muxkid_main(void) {
 
     power_focus = 0;
     confirm_open = 0;
+    msg_open = 0;
+    last_bright_ms = 0;
     refresh_carousel();
     refresh_focus();
 

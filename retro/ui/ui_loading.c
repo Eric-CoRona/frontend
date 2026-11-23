@@ -1,3 +1,5 @@
+#include <common/config/kidmode.h>
+#include <common/ui/kidfont.h>
 #include <stdlib.h>
 #include <string.h>
 #include <common/display/theme.h>
@@ -136,7 +138,7 @@ void loading_message_show(const char *message) {
     if (!message || !*message) return;
 
     if (loading_label && lv_obj_is_valid(loading_label)) {
-        lv_label_set_text(loading_label, message);
+        lv_label_set_text(loading_label, kid_mode_active() ? "LOADING..." : message);
         lv_obj_move_foreground(loading_dim);
         lv_obj_move_foreground(loading_panel);
         lv_obj_update_layout(loading_panel);
@@ -174,6 +176,24 @@ void loading_message_show(const char *message) {
     lv_obj_set_width(loading_label, LV_PCT(100));
     lv_obj_set_style_text_align(loading_label, LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
     lv_obj_set_style_text_color(loading_label, lv_color_hex(theme.dialogue.content), MU_OBJ_MAIN_DEFAULT);
+
+    // Kid mode: boot-logo look (navy screen, outlined square panel, green pixel letters).
+    if (kid_mode_active()) {
+        kid_style_background(loading_dim);
+
+        lv_obj_set_width(loading_panel, lv_pct(64));
+        lv_obj_set_style_bg_color(loading_panel, lv_color_hex(KID_COL_PANEL), MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_bg_opa(loading_panel, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_border_width(loading_panel, 4, MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_border_color(loading_panel, lv_color_hex(KID_COL_SEA), MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_border_opa(loading_panel, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_radius(loading_panel, 0, MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_pad_all(loading_panel, 32, MU_OBJ_MAIN_DEFAULT);
+
+        lv_obj_set_style_text_font(loading_label, kid_font(4), MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_text_color(loading_label, lv_color_hex(KID_COL_GREEN), MU_OBJ_MAIN_DEFAULT);
+        lv_label_set_text(loading_label, "LOADING...");
+    }
 
     lv_obj_move_foreground(loading_dim);
     lv_obj_move_foreground(loading_panel);

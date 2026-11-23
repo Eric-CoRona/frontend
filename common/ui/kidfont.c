@@ -200,8 +200,16 @@ static void kid_bg_draw_cb(lv_event_t *e) {
     dot.bg_color = lv_color_hex(KID_COL_BLUE);
     dot.bg_opa = LV_OPA_10;
 
-    for (lv_coord_t y = a.y1 + 8; y < a.y2; y += 16) {
-        for (lv_coord_t x = a.x1 + 8; x < a.x2; x += 16) {
+    // Only draw the dots inside the area LVGL is redrawing (often a small strip).
+    const lv_area_t *clip = draw_ctx->clip_area;
+    lv_coord_t y0 = a.y1 + 8, x0 = a.x1 + 8;
+    if (clip->y1 > y0) y0 += ((clip->y1 - y0 + 15) / 16) * 16;
+    if (clip->x1 > x0) x0 += ((clip->x1 - x0 + 15) / 16) * 16;
+    const lv_coord_t y_end = LV_MIN(a.y2, clip->y2 + 1);
+    const lv_coord_t x_end = LV_MIN(a.x2, clip->x2 + 1);
+
+    for (lv_coord_t y = y0; y < y_end; y += 16) {
+        for (lv_coord_t x = x0; x < x_end; x += 16) {
             const lv_area_t d = {x, y, (lv_coord_t) (x + 1), (lv_coord_t) (y + 1)};
             lv_draw_rect(draw_ctx, &dot, &d);
         }

@@ -951,11 +951,14 @@ static int content_switch_select(void) {
 // normal list (which stays hidden but still drives navigation).
 static lv_obj_t *kid_panel;
 static lv_obj_t *kid_rows[2];
+static lv_timer_t *kid_timer;
+static int kid_shown_index = -1;
 
 static void kid_pause_refresh(void) {
     if (!kid_panel) return;
     static const char *names[2] = {"KEEP PLAYING", "GO HOME"};
 
+    kid_shown_index = current_item_index;
     for (int i = 0; i < 2; i++) {
         const int on = current_item_index == i;
         lv_label_set_text_fmt(kid_rows[i], "%s%s", on ? "> " : "  ", names[i]);
@@ -965,7 +968,10 @@ static void kid_pause_refresh(void) {
 
 static void kid_pause_tick(lv_timer_t *timer) {
     LV_UNUSED(timer);
-    if (kid_panel && !lv_obj_has_flag(kid_panel, LV_OBJ_FLAG_HIDDEN)) kid_pause_refresh();
+    // Only touch the labels when the selection moved, so a paused screen stays idle.
+    if (kid_panel && current_item_index != kid_shown_index && !lv_obj_has_flag(kid_panel, LV_OBJ_FLAG_HIDDEN)) {
+        kid_pause_refresh();
+    }
 }
 
 static void kid_pause_build(void) {
@@ -1004,7 +1010,6 @@ static void kid_pause_build(void) {
 
     lv_obj_add_flag(kid_panel, LV_OBJ_FLAG_HIDDEN);
 
-    static lv_timer_t *kid_timer;
     if (!kid_timer) kid_timer = lv_timer_create(kid_pause_tick, 50, NULL);
     kid_pause_refresh();
 }
@@ -1189,7 +1194,12 @@ void pause_menu_init(void) {
 }
 
 void pause_menu_shutdown(void) {
+    if (kid_timer) {
+        lv_timer_del(kid_timer);
+        kid_timer = NULL;
+    }
     kid_panel = NULL;
+    kid_shown_index = -1;
     content_switch_free(&content_switch_items);
     ui_lbl_gb_slot = NULL;
     ui_img_gb_slot_glyph = NULL;

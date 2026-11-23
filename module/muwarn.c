@@ -5,6 +5,7 @@
 #include <SDL2/SDL_ttf.h>
 #include "muxshare.h"
 #include <common/display/text.h>
+#include <common/config/kidmode.h>
 
 #define SHARE_DIR "/opt/muos/share/"
 #define MEDIA_DIR SHARE_DIR "media"
@@ -464,6 +465,9 @@ static void cleanup(void) {
 }
 
 int main(void) {
+    // Kid mode: skip the boot disclaimer so the device starts like a cartridge console.
+    if (kid_mode_active()) return 0;
+
     init_module("muwarn");
     load_device(&device);
     load_config(&config);

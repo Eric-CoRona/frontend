@@ -5,6 +5,7 @@
 
 #include "muxshare.h"
 #include <common/config/kidmode.h>
+#include <common/ui/kidfont.h>
 
 #define KID_MAX_GAMES  512
 #define KID_SCAN_DEPTH 3
@@ -12,12 +13,6 @@
 #define KID_PARENT_MS  3000
 #define KID_GBA_CAT    "Nintendo Game Boy Advance"
 
-#define KID_BG         0x2E2A6E
-#define KID_TILE       0x4B45A8
-#define KID_TILE_FOCUS 0xF2F2F7
-#define KID_TEXT       0xFFFFFF
-#define KID_TEXT_DIM   0xB9B6E8
-#define KID_TILE_TEXT  0x1E1B4B
 
 typedef struct {
     char path[PATH_MAX];
@@ -237,123 +232,135 @@ static void refresh_carousel(void) {
     lv_label_set_text(lbl_count, count);
 }
 
-static lv_obj_t *make_tile(const int w, const int h, const int x, const int y, const int focus) {
-    lv_obj_t *t = lv_obj_create(ui_screen);
+static lv_obj_t *make_label(lv_obj_t *parent, const int scale, const uint32_t colour) {
+    lv_obj_t *l = lv_label_create(parent);
+    lv_obj_set_style_text_font(l, kid_font(scale), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(l, lv_color_hex(colour), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_line_space(l, scale * 2, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_width(l, 0, MU_OBJ_MAIN_DEFAULT);
+    return l;
+}
+
+// Square panel with a pixel outline, like the box around the boot logo.
+static lv_obj_t *make_panel(lv_obj_t *parent, const int w, const int h) {
+    lv_obj_t *t = lv_obj_create(parent);
     lv_obj_remove_style_all(t);
     lv_obj_set_size(t, w, h);
-    lv_obj_align(t, LV_ALIGN_CENTER, x, y);
     lv_obj_clear_flag(t, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_radius(t, 12, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_bg_color(t, lv_color_hex(focus ? KID_TILE_FOCUS : KID_TILE), MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_bg_opa(t, focus ? LV_OPA_COVER : LV_OPA_70, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_border_width(t, focus ? 4 : 0, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_border_color(t, lv_color_hex(0xFFD23F), MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_clip_corner(t, true, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_radius(t, 0, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_color(t, lv_color_hex(KID_COL_PANEL), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(t, LV_OPA_80, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(t, lv_color_hex(KID_COL_SEA), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(t, 3, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_color(t, lv_color_hex(KID_COL_SHADOW), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_ofs_x(t, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_ofs_y(t, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_spread(t, 0, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_width(t, 0, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_shadow_opa(t, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
     return t;
 }
 
+static void set_panel_focus(lv_obj_t *panel, const int focus) {
+    lv_obj_set_style_border_color(panel, lv_color_hex(focus ? KID_COL_GREEN : KID_COL_SEA), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(panel, focus ? 5 : 3, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(panel, focus ? LV_OPA_COVER : LV_OPA_70, MU_OBJ_MAIN_DEFAULT);
+}
+
 static void build_ui(void) {
-    lv_obj_set_style_bg_color(ui_screen, lv_color_hex(KID_BG), MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_bg_opa(ui_screen, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    kid_style_background(ui_screen);
     if (ui_img_wall) lv_obj_add_flag(ui_img_wall, LV_OBJ_FLAG_HIDDEN);
     if (ui_pnl_content) lv_obj_add_flag(ui_pnl_content, LV_OBJ_FLAG_HIDDEN);
+    if (ui_pnl_header) lv_obj_add_flag(ui_pnl_header, LV_OBJ_FLAG_HIDDEN);
+    if (ui_pnl_footer) lv_obj_add_flag(ui_pnl_footer, LV_OBJ_FLAG_HIDDEN);
 
     const int sw = device.mux.width;
     const int sh = device.mux.height;
 
-    tile_w[slot_cur] = sw * 42 / 100;
-    tile_h[slot_cur] = sh * 52 / 100;
-    tile_w[slot_prev] = tile_w[slot_next] = sw * 24 / 100;
-    tile_h[slot_prev] = tile_h[slot_next] = sh * 34 / 100;
+    // Title, top left: the logo's words in their colours.
+    lv_obj_t *title = make_label(ui_screen, 3, KID_COL_GREEN);
+    lv_label_set_recolor(title, true);
+    lv_label_set_text(title, "THEO'S #8CD2FF GAMEBOY#");
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, sw * 4 / 100, sh * 6 / 100);
 
-    const int y = -sh * 6 / 100;
-    const int side_x = sw * 37 / 100;
+    // Shut Down button, top right. Up selects it, A asks to confirm.
+    btn_power = make_panel(ui_screen, 9 * 6 * 2 + 28, 7 * 2 + 22);
+    lv_obj_align(btn_power, LV_ALIGN_TOP_RIGHT, -sw * 4 / 100, sh * 4 / 100);
+    lbl_power = make_label(btn_power, 2, KID_COL_BLUE);
+    lv_label_set_text(lbl_power, "SHUT DOWN");
+    lv_obj_center(lbl_power);
+
+    tile_w[slot_cur] = sw * 40 / 100;
+    tile_h[slot_cur] = sh * 48 / 100;
+    tile_w[slot_prev] = tile_w[slot_next] = sw * 22 / 100;
+    tile_h[slot_prev] = tile_h[slot_next] = sh * 32 / 100;
+
+    const int y = -sh * 3 / 100;
+    const int side_x = sw * 36 / 100;
     const int xs[slot_count] = {-side_x, 0, side_x};
 
     for (int s = 0; s < slot_count; s++) {
-        const int focus = s == slot_cur;
-        tile[s] = make_tile(tile_w[s], tile_h[s], xs[s], y, focus);
+        tile[s] = make_panel(ui_screen, tile_w[s], tile_h[s]);
+        lv_obj_align(tile[s], LV_ALIGN_CENTER, xs[s], y);
+        lv_obj_set_style_clip_corner(tile[s], true, MU_OBJ_MAIN_DEFAULT);
 
         tile_img[s] = lv_img_create(tile[s]);
         lv_obj_set_size(tile_img[s], tile_w[s], tile_h[s]);
         lv_obj_center(tile_img[s]);
 
-        tile_lbl[s] = lv_label_create(tile[s]);
-        lv_obj_set_width(tile_lbl[s], tile_w[s] - 20);
+        tile_lbl[s] = make_label(tile[s], s == slot_cur ? 3 : 2, s == slot_cur ? KID_COL_GREEN : KID_COL_BLUE);
+        lv_obj_set_width(tile_lbl[s], tile_w[s] - 24);
         lv_label_set_long_mode(tile_lbl[s], LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_align(tile_lbl[s], LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
-        lv_obj_set_style_text_color(tile_lbl[s], lv_color_hex(focus ? KID_TILE_TEXT : KID_TEXT), MU_OBJ_MAIN_DEFAULT);
         lv_obj_center(tile_lbl[s]);
     }
 
-    lbl_name = lv_label_create(ui_screen);
-    lv_obj_set_width(lbl_name, sw - 40);
+    // Game name under the middle tile, large.
+    lbl_name = make_label(ui_screen, 4, KID_COL_WHITE);
+    lv_obj_set_width(lbl_name, sw - sw * 8 / 100);
     lv_label_set_long_mode(lbl_name, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(lbl_name, LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_text_color(lbl_name, lv_color_hex(KID_TEXT), MU_OBJ_MAIN_DEFAULT);
-    lv_obj_align(lbl_name, LV_ALIGN_CENTER, 0, y + tile_h[slot_cur] / 2 + sh * 7 / 100);
+    lv_obj_align(lbl_name, LV_ALIGN_CENTER, 0, y + tile_h[slot_cur] / 2 + sh * 8 / 100);
 
-    lbl_count = lv_label_create(ui_screen);
-    lv_obj_set_style_text_color(lbl_count, lv_color_hex(KID_TEXT_DIM), MU_OBJ_MAIN_DEFAULT);
-    lv_obj_align(lbl_count, LV_ALIGN_CENTER, 0, y + tile_h[slot_cur] / 2 + sh * 14 / 100);
+    lbl_count = make_label(ui_screen, 2, KID_COL_SEA);
+    lv_obj_align(lbl_count, LV_ALIGN_CENTER, 0, y + tile_h[slot_cur] / 2 + sh * 16 / 100);
 
-    lbl_empty = lv_label_create(ui_screen);
+    // Button hint along the bottom.
+    lv_obj_t *hint = make_label(ui_screen, 2, KID_COL_BLUE);
+    lv_label_set_recolor(hint, true);
+    lv_label_set_text(hint, "#78E650 < >#  PICK      #78E650 A#  PLAY");
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
+
+    lbl_empty = make_label(ui_screen, 4, KID_COL_GREEN);
     lv_obj_set_width(lbl_empty, sw - 60);
     lv_label_set_long_mode(lbl_empty, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(lbl_empty, LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_text_color(lbl_empty, lv_color_hex(KID_TEXT), MU_OBJ_MAIN_DEFAULT);
-    lv_label_set_text(lbl_empty, "No games yet.\nAsk Dad to add some!");
+    lv_label_set_text(lbl_empty, "NO GAMES YET!\n\nASK DAD TO\nADD SOME");
     lv_obj_center(lbl_empty);
     lv_obj_add_flag(lbl_empty, LV_OBJ_FLAG_HIDDEN);
 
-    // Power button, top right. Up selects it, A asks to turn off.
-    btn_power = lv_obj_create(ui_screen);
-    lv_obj_remove_style_all(btn_power);
-    const int pw = sh * 12 / 100;
-    lv_obj_set_size(btn_power, pw * 2, pw);
-    lv_obj_align(btn_power, LV_ALIGN_TOP_RIGHT, -sw * 3 / 100, sh * 11 / 100);
-    lv_obj_clear_flag(btn_power, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_radius(btn_power, pw / 2, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_bg_opa(btn_power, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_border_color(btn_power, lv_color_hex(0xFFD23F), MU_OBJ_MAIN_DEFAULT);
-
-    lbl_power = lv_label_create(btn_power);
-    lv_label_set_text(lbl_power, "Off");
-    lv_obj_center(lbl_power);
-
-    pnl_confirm = lv_obj_create(ui_screen);
-    lv_obj_remove_style_all(pnl_confirm);
-    lv_obj_set_size(pnl_confirm, sw * 70 / 100, sh * 40 / 100);
-    lv_obj_center(pnl_confirm);
-    lv_obj_clear_flag(pnl_confirm, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_radius(pnl_confirm, 16, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_bg_color(pnl_confirm, lv_color_hex(KID_TILE_FOCUS), MU_OBJ_MAIN_DEFAULT);
+    pnl_confirm = make_panel(ui_screen, sw * 66 / 100, sh * 42 / 100);
     lv_obj_set_style_bg_opa(pnl_confirm, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_border_width(pnl_confirm, 4, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_border_color(pnl_confirm, lv_color_hex(0xFFD23F), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(pnl_confirm, lv_color_hex(KID_COL_GREEN), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(pnl_confirm, 5, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_center(pnl_confirm);
 
-    lv_obj_t *lbl_confirm = lv_label_create(pnl_confirm);
-    lv_obj_set_width(lbl_confirm, sw * 64 / 100);
-    lv_label_set_long_mode(lbl_confirm, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(lbl_confirm, LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_text_color(lbl_confirm, lv_color_hex(KID_TILE_TEXT), MU_OBJ_MAIN_DEFAULT);
-    lv_label_set_text(lbl_confirm, "Turn off?\n\nA = Yes      B = No");
-    lv_obj_center(lbl_confirm);
+    lv_obj_t *lbl_confirm = make_label(pnl_confirm, 4, KID_COL_GREEN);
+    lv_label_set_text(lbl_confirm, "SHUT DOWN?");
+    lv_obj_align(lbl_confirm, LV_ALIGN_CENTER, 0, -sh * 6 / 100);
+
+    lv_obj_t *lbl_choice = make_label(pnl_confirm, 3, KID_COL_BLUE);
+    lv_label_set_recolor(lbl_choice, true);
+    lv_label_set_text(lbl_choice, "#78E650 A# YES    #78E650 B# NO");
+    lv_obj_align(lbl_choice, LV_ALIGN_CENTER, 0, sh * 8 / 100);
     lv_obj_add_flag(pnl_confirm, LV_OBJ_FLAG_HIDDEN);
-
-    lv_obj_move_foreground(ui_pnl_header);
-    lv_obj_move_foreground(ui_pnl_footer);
 }
 
 static void refresh_focus(void) {
-    lv_obj_set_style_bg_color(btn_power, lv_color_hex(power_focus ? KID_TILE_FOCUS : KID_TILE), MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_border_width(btn_power, power_focus ? 4 : 0, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_text_color(lbl_power, lv_color_hex(power_focus ? KID_TILE_TEXT : KID_TEXT), MU_OBJ_MAIN_DEFAULT);
+    set_panel_focus(btn_power, power_focus);
+    lv_obj_set_style_text_color(lbl_power, lv_color_hex(power_focus ? KID_COL_GREEN : KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
 
-    if (game_count > 0) {
-        lv_obj_set_style_border_width(tile[slot_cur], power_focus ? 0 : 4, MU_OBJ_MAIN_DEFAULT);
-        lv_obj_set_style_bg_opa(tile[slot_cur], power_focus ? LV_OPA_70 : LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
-    }
+    if (game_count > 0) set_panel_focus(tile[slot_cur], !power_focus);
+    set_panel_focus(tile[slot_prev], 0);
+    set_panel_focus(tile[slot_next], 0);
 }
 
 static void show_confirm(const int show) {

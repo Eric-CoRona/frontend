@@ -219,6 +219,12 @@ int set_splash_image_path(char *splash_image_name) {
         {0, 0},
     };
 
+    // Kid mode: shut-down and restart screens styled like the THEO'S GAMEBOY boot logo.
+    if (kid_mode_active()) {
+        snprintf(splash_image_path, sizeof(splash_image_path), OPT_SHARE_PATH "kid/%s.png", splash_image_name);
+        if (file_exist(splash_image_path)) return 1;
+    }
+
     const char *curr_lang = config.settings.general.language;
 
     for (size_t i = 0; i < A_SIZE(paths); ++i) {

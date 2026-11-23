@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <common/config/kidmode.h>
+#include <common/ui/kidfont.h>
 #include <common/platform/audio.h>
 #include <common/platform/battery.h>
 #include <common/config/config.h>
@@ -946,7 +947,83 @@ static int content_switch_select(void) {
     return 1;
 }
 
+// Kid mode pause screen: a boot-logo style panel with two big rows, drawn over the
+// normal list (which stays hidden but still drives navigation).
+static lv_obj_t *kid_panel;
+static lv_obj_t *kid_rows[2];
+
+static void kid_pause_refresh(void) {
+    if (!kid_panel) return;
+    static const char *names[2] = {"KEEP PLAYING", "GO HOME"};
+
+    for (int i = 0; i < 2; i++) {
+        const int on = current_item_index == i;
+        lv_label_set_text_fmt(kid_rows[i], "%s%s", on ? "> " : "  ", names[i]);
+        lv_obj_set_style_text_color(kid_rows[i], lv_color_hex(on ? KID_COL_GREEN : KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+    }
+}
+
+static void kid_pause_tick(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    if (kid_panel && !lv_obj_has_flag(kid_panel, LV_OBJ_FLAG_HIDDEN)) kid_pause_refresh();
+}
+
+static void kid_pause_build(void) {
+    const int sw = device.mux.width;
+    const int sh = device.mux.height;
+
+    kid_panel = lv_obj_create(ui_screen);
+    lv_obj_remove_style_all(kid_panel);
+    lv_obj_set_size(kid_panel, sw * 62 / 100, sh * 56 / 100);
+    lv_obj_center(kid_panel);
+    lv_obj_clear_flag(kid_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(kid_panel, lv_color_hex(KID_COL_PANEL), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(kid_panel, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(kid_panel, lv_color_hex(KID_COL_SEA), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(kid_panel, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_radius(kid_panel, 0, MU_OBJ_MAIN_DEFAULT);
+
+    lv_obj_t *title = lv_label_create(kid_panel);
+    lv_obj_set_style_text_font(title, kid_font(3), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(title, lv_color_hex(KID_COL_SEA), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_text(title, "PAUSED");
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, sh * 5 / 100);
+
+    for (int i = 0; i < 2; i++) {
+        kid_rows[i] = lv_label_create(kid_panel);
+        lv_obj_set_style_text_font(kid_rows[i], kid_font(4), MU_OBJ_MAIN_DEFAULT);
+        lv_obj_align(kid_rows[i], LV_ALIGN_LEFT_MID, sw * 6 / 100, (i == 0 ? -1 : 1) * sh * 6 / 100 + sh * 2 / 100);
+    }
+
+    lv_obj_t *hint = lv_label_create(kid_panel);
+    lv_obj_set_style_text_font(hint, kid_font(2), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(hint, lv_color_hex(KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_recolor(hint, true);
+    lv_label_set_text(hint, "#78E650 A#  OK");
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
+
+    lv_obj_add_flag(kid_panel, LV_OBJ_FLAG_HIDDEN);
+
+    static lv_timer_t *kid_timer;
+    if (!kid_timer) kid_timer = lv_timer_create(kid_pause_tick, 50, NULL);
+    kid_pause_refresh();
+}
+
 static void set_chrome_visible(const int visible) {
+    if (kid_panel) {
+        if (visible) {
+            lv_obj_add_flag(ui_pnl_header, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(ui_pnl_content, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(ui_pnl_footer, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(dim_overlay, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(kid_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(kid_panel);
+            kid_pause_refresh();
+            return;
+        }
+        lv_obj_add_flag(kid_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+
     if (visible) {
         lv_obj_clear_flag(ui_pnl_header, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(ui_pnl_content, LV_OBJ_FLAG_HIDDEN);
@@ -1102,11 +1179,14 @@ void pause_menu_init(void) {
     lv_obj_set_user_data(ui_screen, mux_module);
     lv_label_set_text(ui_lbl_datetime, get_datetime());
 
+    if (kid_mode_active()) kid_pause_build();
+
     set_chrome_visible(0);
     fade_in_instant();
 }
 
 void pause_menu_shutdown(void) {
+    kid_panel = NULL;
     content_switch_free(&content_switch_items);
     ui_lbl_gb_slot = NULL;
     ui_img_gb_slot_glyph = NULL;

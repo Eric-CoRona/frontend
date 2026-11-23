@@ -7,6 +7,7 @@
 #include <common/config/kidmode.h>
 
 #define KID_MAX_GAMES  512
+#define KID_SCAN_DEPTH 3
 #define KID_IDX_FILE   "/tmp/kid_idx"
 #define KID_PARENT_MS  3000
 #define KID_GBA_CAT    "Nintendo Game Boy Advance"
@@ -39,6 +40,12 @@ static lv_obj_t *tile_lbl[slot_count];
 static lv_obj_t *lbl_name;
 static lv_obj_t *lbl_count;
 static lv_obj_t *lbl_empty;
+static lv_obj_t *btn_power;
+static lv_obj_t *lbl_power;
+static lv_obj_t *pnl_confirm;
+
+static int power_focus;
+static int confirm_open;
 
 static int has_ext(const char *name, const char *ext) {
     const char *dot = strrchr(name, '.');
@@ -81,18 +88,32 @@ static void make_display_name(const char *file, char *out, const size_t out_size
     if (!out[0]) snprintf(out, out_size, "%s", file);
 }
 
-static void add_games_from(const char *dir, const int in_gba_dir) {
+static int game_known(const char *real) {
+    for (int i = 0; i < game_count; i++)
+        if (strcmp(games[i].path, real) == 0) return 1;
+    return 0;
+}
+
+// Walks a folder (and up to KID_SCAN_DEPTH levels below it) for GBA games.
+static void add_games_from(const char *dir, const int in_gba_dir, const int depth) {
     DIR *d = opendir(dir);
     if (!d) return;
 
     const struct dirent *ent;
     while ((ent = readdir(d)) != NULL && game_count < KID_MAX_GAMES) {
-        if (!is_game_file(ent->d_name, in_gba_dir)) continue;
+        if (ent->d_name[0] == '.') continue;
 
         char full[PATH_MAX];
         snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name);
         remove_double_slashes(full);
-        if (!file_exist(full)) continue;
+
+        if (dir_exist(full)) {
+            if (depth < KID_SCAN_DEPTH) add_games_from(full, in_gba_dir || is_gba_dir(ent->d_name), depth + 1);
+            continue;
+        }
+
+        if (!is_game_file(ent->d_name, in_gba_dir)) continue;
+        if (game_known(full)) continue;
 
         kid_game *g = &games[game_count++];
         snprintf(g->path, sizeof(g->path), "%s", full);
@@ -107,40 +128,39 @@ static int game_cmp(const void *a, const void *b) {
 }
 
 // Games come from the folder named on the first line of the kid mode flag file,
-// or else from every GBA-looking folder under ROMS (plus loose .gba files there).
+// or else from GBA games anywhere under the ROMS folder. Only the first ROMS
+// folder that exists is used, so union mounts don't list a game twice.
 static void scan_games(void) {
-    games = calloc(KID_MAX_GAMES, sizeof(kid_game));
+    if (!games) games = calloc(KID_MAX_GAMES, sizeof(kid_game));
     game_count = 0;
     if (!games) return;
 
     char *custom = read_line_char_from(KID_MODE_FLAG, 1);
     if (custom && custom[0] && dir_exist(custom)) {
-        add_games_from(custom, 1);
+        add_games_from(custom, 1, 0);
     } else {
-        char root[PATH_MAX];
-        union_get_roms_root(root, sizeof(root));
+        char roots[5][PATH_MAX];
+        union_get_roms_root(roots[0], sizeof(roots[0]));
+        snprintf(roots[1], sizeof(roots[1]), "/mnt/union/" MAIN_ROM_DIR);
+        snprintf(roots[2], sizeof(roots[2]), "/mnt/mmc/" MAIN_ROM_DIR);
+        snprintf(roots[3], sizeof(roots[3]), "/mnt/sdcard/" MAIN_ROM_DIR);
+        snprintf(roots[4], sizeof(roots[4]), "/mnt/usb/" MAIN_ROM_DIR);
 
-        add_games_from(root, 0);
+        for (size_t i = 0; i < A_SIZE(roots); i++) {
+            if (!dir_exist(roots[i])) continue;
+            add_games_from(roots[i], 0, 0);
+            LOG_INFO(mux_module, "Kid picker scanned %s: %d games", roots[i], game_count);
+            if (game_count > 0) break;
+        }
 
-        DIR *d = opendir(root);
-        if (d) {
-            const struct dirent *ent;
-            while ((ent = readdir(d)) != NULL) {
-                if (ent->d_name[0] == '.') continue;
-
-                char sub[PATH_MAX];
-                snprintf(sub, sizeof(sub), "%s/%s", root, ent->d_name);
-                if (!dir_exist(sub)) continue;
-
-                add_games_from(sub, is_gba_dir(ent->d_name));
-            }
-            closedir(d);
+        // Nothing in GBA-named folders: accept zipped games in any folder too.
+        for (size_t i = 0; i < A_SIZE(roots) && game_count == 0; i++) {
+            if (dir_exist(roots[i])) add_games_from(roots[i], 1, 0);
         }
     }
     free(custom);
 
     qsort(games, (size_t) game_count, sizeof(kid_game), game_cmp);
-    LOG_INFO(mux_module, "Kid picker found %d games", game_count);
 }
 
 static int box_art_path(const kid_game *g, char *out, const size_t out_size) {
@@ -282,12 +302,106 @@ static void build_ui(void) {
     lv_label_set_long_mode(lbl_empty, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(lbl_empty, LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
     lv_obj_set_style_text_color(lbl_empty, lv_color_hex(KID_TEXT), MU_OBJ_MAIN_DEFAULT);
-    lv_label_set_text(lbl_empty, "No games yet.\nAsk a grown-up to add some!");
+    lv_label_set_text(lbl_empty, "No games yet.\nAsk Dad to add some!");
     lv_obj_center(lbl_empty);
     lv_obj_add_flag(lbl_empty, LV_OBJ_FLAG_HIDDEN);
 
+    // Power button, top right. Up selects it, A asks to turn off.
+    btn_power = lv_obj_create(ui_screen);
+    lv_obj_remove_style_all(btn_power);
+    const int pw = sh * 12 / 100;
+    lv_obj_set_size(btn_power, pw * 2, pw);
+    lv_obj_align(btn_power, LV_ALIGN_TOP_RIGHT, -sw * 3 / 100, sh * 11 / 100);
+    lv_obj_clear_flag(btn_power, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(btn_power, pw / 2, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(btn_power, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(btn_power, lv_color_hex(0xFFD23F), MU_OBJ_MAIN_DEFAULT);
+
+    lbl_power = lv_label_create(btn_power);
+    lv_label_set_text(lbl_power, "Off");
+    lv_obj_center(lbl_power);
+
+    pnl_confirm = lv_obj_create(ui_screen);
+    lv_obj_remove_style_all(pnl_confirm);
+    lv_obj_set_size(pnl_confirm, sw * 70 / 100, sh * 40 / 100);
+    lv_obj_center(pnl_confirm);
+    lv_obj_clear_flag(pnl_confirm, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_radius(pnl_confirm, 16, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_color(pnl_confirm, lv_color_hex(KID_TILE_FOCUS), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_bg_opa(pnl_confirm, LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(pnl_confirm, 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_color(pnl_confirm, lv_color_hex(0xFFD23F), MU_OBJ_MAIN_DEFAULT);
+
+    lv_obj_t *lbl_confirm = lv_label_create(pnl_confirm);
+    lv_obj_set_width(lbl_confirm, sw * 64 / 100);
+    lv_label_set_long_mode(lbl_confirm, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(lbl_confirm, LV_TEXT_ALIGN_CENTER, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(lbl_confirm, lv_color_hex(KID_TILE_TEXT), MU_OBJ_MAIN_DEFAULT);
+    lv_label_set_text(lbl_confirm, "Turn off?\n\nA = Yes      B = No");
+    lv_obj_center(lbl_confirm);
+    lv_obj_add_flag(pnl_confirm, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_move_foreground(ui_pnl_header);
     lv_obj_move_foreground(ui_pnl_footer);
+}
+
+static void refresh_focus(void) {
+    lv_obj_set_style_bg_color(btn_power, lv_color_hex(power_focus ? KID_TILE_FOCUS : KID_TILE), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_border_width(btn_power, power_focus ? 4 : 0, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_color(lbl_power, lv_color_hex(power_focus ? KID_TILE_TEXT : KID_TEXT), MU_OBJ_MAIN_DEFAULT);
+
+    if (game_count > 0) {
+        lv_obj_set_style_border_width(tile[slot_cur], power_focus ? 0 : 4, MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_bg_opa(tile[slot_cur], power_focus ? LV_OPA_70 : LV_OPA_COVER, MU_OBJ_MAIN_DEFAULT);
+    }
+}
+
+static void show_confirm(const int show) {
+    confirm_open = show;
+    if (show) {
+        lv_obj_clear_flag(pnl_confirm, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(pnl_confirm);
+    } else {
+        lv_obj_add_flag(pnl_confirm, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void handle_up(void) {
+    if (confirm_open || power_focus) return;
+    play_sound(snd_navigate);
+    power_focus = 1;
+    refresh_focus();
+}
+
+static void handle_down(void) {
+    if (confirm_open || !power_focus) return;
+    play_sound(snd_navigate);
+    power_focus = 0;
+    refresh_focus();
+}
+
+static void handle_b(void) {
+    if (!confirm_open) return;
+    play_sound(snd_back);
+    show_confirm(0);
+}
+
+// The SD card can still be mounting at boot: look again while the list is empty.
+static void rescan_task(lv_timer_t *timer) {
+    if (game_count > 0) {
+        lv_timer_del(timer);
+        return;
+    }
+
+    scan_games();
+    if (game_count > 0) {
+        lv_obj_add_flag(lbl_empty, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_name, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_count, LV_OBJ_FLAG_HIDDEN);
+        refresh_carousel();
+        refresh_focus();
+        lv_timer_del(timer);
+    }
 }
 
 static void kid_bright(const char *dir) {
@@ -307,7 +421,7 @@ static void handle_r2(void) {
 }
 
 static void move(const int dir) {
-    if (game_count <= 1) return;
+    if (confirm_open || power_focus || game_count <= 1) return;
     play_sound(snd_navigate);
     current_game = wrap_index(current_game + dir);
     refresh_carousel();
@@ -322,6 +436,20 @@ static void handle_right(void) {
 }
 
 static void handle_a(void) {
+    if (confirm_open) {
+        play_sound(snd_confirm);
+        exit_status = 0;
+        load_mux("shutdown");
+        mux_input_stop();
+        return;
+    }
+
+    if (power_focus) {
+        play_sound(snd_confirm);
+        show_confirm(1);
+        return;
+    }
+
     if (game_count <= 0) return;
 
     const kid_game *g = &games[current_game];
@@ -332,7 +460,7 @@ static void handle_a(void) {
 
     if (!load_content(0, launch_path)) {
         play_sound(snd_error);
-        toast_message("This game isn't ready yet. Ask a grown-up!", tst_wait_m);
+        toast_message("This game isn't ready yet. Ask Dad!", tst_wait_m);
         return;
     }
 
@@ -392,7 +520,12 @@ int muxkid_main(void) {
     current_game = file_exist(KID_IDX_FILE) ? read_line_int_from(KID_IDX_FILE, 1) : 0;
     if (current_game < 0 || current_game >= game_count) current_game = 0;
 
+    power_focus = 0;
+    confirm_open = 0;
     refresh_carousel();
+    refresh_focus();
+
+    lv_timer_t *rescan = game_count > 0 ? NULL : lv_timer_create(rescan_task, 2000, NULL);
 
     init_timer(ui_gen_refresh_task, NULL);
 
@@ -401,6 +534,9 @@ int muxkid_main(void) {
         .press_handler =
             {
                 [mux_input_a] = handle_a,
+                [mux_input_b] = handle_b,
+                [mux_input_dpad_up] = handle_up,
+                [mux_input_dpad_down] = handle_down,
                 [mux_input_l2] = handle_l2,
                 [mux_input_r2] = handle_r2,
                 [mux_input_dpad_left] = handle_left,
@@ -428,6 +564,8 @@ int muxkid_main(void) {
     );
 
     mux_input_task(&input_opts);
+
+    if (rescan && game_count == 0) lv_timer_del(rescan);
 
     free(games);
     games = NULL;

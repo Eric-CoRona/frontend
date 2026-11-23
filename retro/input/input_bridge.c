@@ -1,5 +1,6 @@
 #include <string.h>
 #include <common/platform/input.h>
+#include <common/config/kidmode.h>
 #include "../core/core.h"
 #include "../core/muxretro.h"
 #include "../core/perf.h"
@@ -135,16 +136,28 @@ static void compile_input_routes(const int port, const double fps) {
     input_route_stick_bound[port][1] = 0;
 
     for (int source = 0; source < PORT_SOURCE_COUNT; source++) {
-        if (macro[source] < 0 && (target[source] < 0 || target[source] >= PORT_TARGET_COUNT)) continue;
+        const mux_input_type type = (mux_input_type) session_settings_source_types[source];
+        int src_target = target[source];
+        int src_macro = macro[source];
+        int src_turbo = turbo[source];
+
+        // Kid mode: the GBA has no X/Y, so X is a plain A press and Y a plain B press (no turbo or macro).
+        if (kid_mode_active() && (type == mux_input_x || type == mux_input_y)) {
+            src_target = type == mux_input_x ? RETRO_DEVICE_ID_JOYPAD_A : RETRO_DEVICE_ID_JOYPAD_B;
+            src_macro = -1;
+            src_turbo = 0;
+        }
+
+        if (src_macro < 0 && (src_target < 0 || src_target >= PORT_TARGET_COUNT)) continue;
 
         input_route_t *route = &input_routes[port][input_route_count[port]++];
         *route = (input_route_t) {
             .source = source,
-            .type = (mux_input_type) session_settings_source_types[source],
-            .target = target[source],
-            .macro = macro[source],
+            .type = type,
+            .target = src_target,
+            .macro = src_macro,
             .stick = -1,
-            .turbo_ms = turbo[source],
+            .turbo_ms = src_turbo,
         };
         if (route->target >= PORT_DIGITAL_COUNT)
             session_settings_target_stick(route->target, &route->stick, &route->axis_x, &route->axis_y);

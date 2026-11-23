@@ -887,7 +887,8 @@ void pause_menu_rebuild(void) {
 
     compute_row_indices();
 
-    if (row_resume >= 0) add_label("resume", lang.muxretro.resume, lang.muxretro.help.pause.resume);
+    const int kid = kid_mode_active();
+    if (row_resume >= 0) add_label("resume", kid ? "Keep playing" : lang.muxretro.resume, lang.muxretro.help.pause.resume);
     if (row_game_state >= 0) add_label("state", lang.muxretro.game_state, lang.muxretro.help.pause.game_state);
     if (row_netplay >= 0) add_label("network", lang.muxretro.network_play, lang.muxretro.help.pause.network_play);
     if (row_cheevo >= 0) add_label("trophy", lang.muxretro.cheevo.achievements, lang.muxretro.help.pause.cheevo);
@@ -899,7 +900,7 @@ void pause_menu_rebuild(void) {
     if (row_settings >= 0) add_label("settings", lang.muxretro.settings, lang.muxretro.help.pause.settings);
     if (row_information >= 0) add_label("info", lang.muxretro.information, lang.muxretro.help.pause.information);
     if (row_restart >= 0) add_label("restart", lang.muxretro.restart, lang.muxretro.help.pause.restart);
-    add_label("exit", lang.muxretro.quit, lang.muxretro.help.pause.quit);
+    add_label("exit", kid ? "Go home" : lang.muxretro.quit, lang.muxretro.help.pause.quit);
 
     ui_count_static = row_count;
     first_open = 0;

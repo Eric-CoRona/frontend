@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <string.h>
-#include <common/config/kidmode.h>
 #include <common/runtime/init.h>
+#include <common/runtime/exec.h>
+#include <common/config/kidmode.h>
+#include <common/config/config.h>
 #include <common/platform/input.h>
 #include <common/display/language.h>
 #include <common/runtime/log.h>
@@ -518,6 +520,11 @@ static void level_watch_task(const uint32_t now) {
     if (ui_pnl_progress_volume && ui_pnl_progress_brightness) ui_common_progress_tick();
 }
 
+static void kid_run_bright(const char *dir) {
+    const char *args[] = {DEV_SCRIPT "bright.sh", dir, NULL};
+    run_exec(args, A_SIZE(args), 1, 0, NULL, NULL);
+}
+
 void hotkeys_volume_bright_task(void) {
     const uint32_t now = SDL_GetTicks();
     level_watch_task(now);
@@ -553,10 +560,16 @@ void hotkeys_volume_bright_task(void) {
         const int l2_now = mux_input_pressed(mux_input_l2);
         const int r2_now = mux_input_pressed(mux_input_r2);
 
+        // The ui_common handlers only draw the bar; muhotkey normally runs bright.sh to change the
+        // level. Run it here, and never dim below one step so the screen can't go black.
         if (nav_repeat_step(&rpt_kid_bright_down, l2_now && !prev_kid_l2, l2_now, 1, now)) {
+            const int step = config.settings.advanced.inc_bright > 0 ? config.settings.advanced.inc_bright : 16;
+            // bright.sh D drops one step; stop while at least one step remains above zero.
+            if (current_brightness >= step * 2) kid_run_bright("D");
             ui_common_handle_bright_down();
         }
         if (nav_repeat_step(&rpt_kid_bright_up, r2_now && !prev_kid_r2, r2_now, 1, now)) {
+            kid_run_bright("U");
             ui_common_handle_bright_up();
         }
 

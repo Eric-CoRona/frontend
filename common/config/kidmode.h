@@ -30,12 +30,23 @@
 // Kid picker in charge (kid mode on and the parent combo not used since boot).
 int kid_child_active(void);
 
-// bright.sh argument for one dim step from `current`: a normal step, the last step down to
-// KID_MIN_BRIGHT, or NULL when already there (so the screen never goes black).
-static inline const char *kid_dim_arg(const int current, const int step) {
-    if (current - step >= KID_MIN_BRIGHT) return "D";
-    if (current > KID_MIN_BRIGHT) return "10";
-    return 0;
+// Kid brightness moves along an even ladder (10, 26, 42 ... 250, then 255) so every press is the
+// same size, instead of bright.sh's U/D which creep by 1 near the bottom. Returns the next level
+// from `current` in direction dir (+1 brighter, -1 dimmer), or -1 when already at the end.
+#define KID_BRIGHT_STEP 16
+#define KID_MAX_BRIGHT  255
+
+static inline int kid_bright_next(const int current, const int dir) {
+    if (dir > 0) {
+        if (current >= KID_MAX_BRIGHT) return -1;
+        for (int v = KID_MIN_BRIGHT; v < KID_MAX_BRIGHT; v += KID_BRIGHT_STEP)
+            if (v > current) return v;
+        return KID_MAX_BRIGHT;
+    }
+    if (current <= KID_MIN_BRIGHT) return -1;
+    int best = KID_MIN_BRIGHT;
+    for (int v = KID_MIN_BRIGHT; v < current && v < KID_MAX_BRIGHT; v += KID_BRIGHT_STEP) best = v;
+    return best;
 }
 
 int kid_mode_active(void);

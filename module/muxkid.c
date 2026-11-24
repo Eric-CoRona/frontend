@@ -47,6 +47,7 @@ static int slide_running;
 static int slide_var; // animation handle (address only)
 static lv_obj_t *lbl_name;
 static lv_obj_t *lbl_name_shadow;
+static lv_obj_t *lbl_hint;
 static lv_obj_t *lbl_count;
 static lv_obj_t *lbl_empty;
 static lv_obj_t *btn_power;
@@ -357,11 +358,23 @@ static void set_name_text(const char *name) {
     }
 
     const lv_font_t *f = kid_font(scale);
+    const lv_coord_t two_lines = f->line_height * 2 + scale * 2;
+    lv_point_t size;
+    lv_txt_get_size(&size, name, f, 0, scale * 2, w, LV_TEXT_FLAG_NONE);
+    const lv_coord_t text_h = size.y < two_lines ? size.y : two_lines;
+
+    // Centre the name in the gap between the middle cover and the button hint.
+    const int sh = device.mux.height;
+    const int cover_bottom = sh / 2 + tile_y + tgt_h[slot_cur] / 2;
+    const int hint_top = sh - sh * 4 / 100 - kid_font(2)->line_height;
+    const int top = (cover_bottom + hint_top) / 2 - text_h / 2;
+
     lv_obj_t *labels[2] = {lbl_name_shadow, lbl_name};
     for (int i = 0; i < 2; i++) {
         lv_obj_set_style_text_font(labels[i], f, MU_OBJ_MAIN_DEFAULT);
         lv_obj_set_style_text_line_space(labels[i], scale * 2, MU_OBJ_MAIN_DEFAULT);
-        lv_obj_set_height(labels[i], f->line_height * 2 + scale * 2);
+        lv_obj_set_height(labels[i], text_h);
+        lv_obj_align(labels[i], LV_ALIGN_TOP_MID, i == 0 ? 2 : 0, top + (i == 0 ? 2 : 0));
         lv_label_set_text(labels[i], name);
     }
 }
@@ -465,9 +478,9 @@ static void build_ui(void) {
     kid_battery_set(bat_icon, kid_battery_percent(), kid_battery_charging());
 
     tile_w[slot_cur] = sw * 38 / 100;
-    tile_h[slot_cur] = sh * 44 / 100;
+    tile_h[slot_cur] = sh * 53 / 100; // covers 20% bigger than the first layout
     tile_w[slot_prev] = tile_w[slot_next] = sw * 22 / 100;
-    tile_h[slot_prev] = tile_h[slot_next] = sh * 30 / 100;
+    tile_h[slot_prev] = tile_h[slot_next] = sh * 36 / 100;
 
     const int y = -sh * 7 / 100;
     const int side_x = sw * 36 / 100;
@@ -514,10 +527,10 @@ static void build_ui(void) {
     lv_obj_add_flag(lbl_count, LV_OBJ_FLAG_HIDDEN);
 
     // Button hint along the bottom.
-    lv_obj_t *hint = make_label(ui_screen, 2, KID_COL_BLUE);
-    lv_label_set_recolor(hint, true);
-    lv_label_set_text(hint, "#78E650 < >#  PICK      #78E650 A#  PLAY");
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
+    lbl_hint = make_label(ui_screen, 2, KID_COL_BLUE);
+    lv_label_set_recolor(lbl_hint, true);
+    lv_label_set_text(lbl_hint, "#78E650 < >#  PICK      #78E650 A#  PLAY");
+    lv_obj_align(lbl_hint, LV_ALIGN_BOTTOM_MID, 0, -sh * 4 / 100);
 
     lbl_empty = make_label(ui_screen, 4, KID_COL_GREEN);
     lv_obj_set_width(lbl_empty, sw - 60);
@@ -730,9 +743,23 @@ static void kid_battery_task(lv_timer_t *timer) {
     open_panel(pnl_low);
 }
 
-static void kid_bright(const char *dir) {
-    const char *args[] = {DEV_SCRIPT "bright.sh", dir, NULL};
+// Brightness level we last set; trusted for a moment because current_brightness catches up a
+// little later, so quick presses keep stepping instead of repeating the same level.
+static int kid_level = -1;
+static uint32_t kid_level_ms;
+
+static void kid_bright(const int dir) {
+    const uint32_t now = SDL_GetTicks();
+    const int from = (kid_level >= 0 && now - kid_level_ms < 2000) ? kid_level : current_brightness;
+    const int to = kid_bright_next(from, dir);
+    if (to < 0) return;
+
+    char value[8];
+    snprintf(value, sizeof(value), "%d", to);
+    const char *args[] = {DEV_SCRIPT "bright.sh", value, NULL};
     run_exec(args, A_SIZE(args), 1, 0, NULL, NULL);
+    kid_level = to;
+    kid_level_ms = now;
 }
 
 // Holding L2/R2 repeats quickly; space the brightness steps out so each one lands.
@@ -745,15 +772,13 @@ static int bright_ready(void) {
 
 static void handle_l2(void) {
     if (!bright_ready()) return;
-    const int step = config.settings.advanced.inc_bright > 0 ? config.settings.advanced.inc_bright : 16;
-    const char *arg = kid_dim_arg(current_brightness, step);
-    if (arg) kid_bright(arg);
+    kid_bright(-1);
     ui_common_handle_bright_down();
 }
 
 static void handle_r2(void) {
     if (!bright_ready()) return;
-    kid_bright("U");
+    kid_bright(+1);
     ui_common_handle_bright_up();
 }
 

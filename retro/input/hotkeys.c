@@ -486,9 +486,22 @@ static void level_watch_task(const uint32_t now) {
     if (ui_pnl_progress_volume && ui_pnl_progress_brightness) ui_common_progress_tick();
 }
 
-static void kid_run_bright(const char *dir) {
-    const char *args[] = {DEV_SCRIPT "bright.sh", dir, NULL};
+// Even brightness ladder (see kid_bright_next). The level we set is trusted briefly because
+// current_brightness catches up a little later.
+static int kid_level = -1;
+static uint32_t kid_level_ms;
+
+static void kid_run_bright(const int dir, const uint32_t now) {
+    const int from = (kid_level >= 0 && now - kid_level_ms < 2000) ? kid_level : current_brightness;
+    const int to = kid_bright_next(from, dir);
+    if (to < 0) return;
+
+    char value[8];
+    snprintf(value, sizeof(value), "%d", to);
+    const char *args[] = {DEV_SCRIPT "bright.sh", value, NULL};
     run_exec(args, A_SIZE(args), 1, 0, NULL, NULL);
+    kid_level = to;
+    kid_level_ms = now;
 }
 
 void hotkeys_volume_bright_task(void) {
@@ -529,14 +542,12 @@ void hotkeys_volume_bright_task(void) {
         // The ui_common handlers only draw the bar; muhotkey normally runs bright.sh to change the
         // level. Run it here, and never dim below one step so the screen can't go black.
         if (nav_repeat_step(&rpt_kid_bright_down, l2_now && !prev_kid_l2, l2_now, 1, now)) {
-            const int step = config.settings.advanced.inc_bright > 0 ? config.settings.advanced.inc_bright : 16;
-            // One step down, ending at muOS's safe minimum rather than black.
-            const char *arg = kid_dim_arg(current_brightness, step);
-            if (arg) kid_run_bright(arg);
+            // One even step down, ending at muOS's safe minimum rather than black.
+            kid_run_bright(-1, now);
             ui_common_handle_bright_down();
         }
         if (nav_repeat_step(&rpt_kid_bright_up, r2_now && !prev_kid_r2, r2_now, 1, now)) {
-            kid_run_bright("U");
+            kid_run_bright(+1, now);
             ui_common_handle_bright_up();
         }
 

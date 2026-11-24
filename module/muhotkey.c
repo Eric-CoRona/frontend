@@ -838,14 +838,16 @@ static void handle_idle(void) {
         kid_clock_next = global_tick + KID_CLOCK_SAVE_SECONDS * 1000;
         const time_t now = time(NULL);
         if (now > 1735689600) { // only a sane clock (after 2025-01-01)
-            char tmp[] = KID_CLOCK_FILE ".tmp";
+            // Own temp name: halt.sh saves the clock too and must never share a temp file.
+            char tmp[sizeof(KID_CLOCK_FILE) + 32];
+            snprintf(tmp, sizeof(tmp), "%s.%ld.tmp", KID_CLOCK_FILE, (long) getpid());
             FILE *f = fopen(tmp, "w");
             if (f) {
                 fprintf(f, "%lld\n", (long long) now);
                 fflush(f);
                 fsync(fileno(f));
-                fclose(f);
-                rename(tmp, KID_CLOCK_FILE);
+                const int ok = fclose(f) == 0;
+                if (!ok || rename(tmp, KID_CLOCK_FILE) != 0) remove(tmp);
             }
         }
     }

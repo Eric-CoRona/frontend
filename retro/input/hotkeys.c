@@ -486,22 +486,8 @@ static void level_watch_task(const uint32_t now) {
     if (ui_pnl_progress_volume && ui_pnl_progress_brightness) ui_common_progress_tick();
 }
 
-// Even brightness ladder (see kid_bright_next). The level we set is trusted briefly because
-// current_brightness catches up a little later.
-static int kid_level = -1;
-static uint32_t kid_level_ms;
-
 static void kid_run_bright(const int dir, const uint32_t now) {
-    const int from = (kid_level >= 0 && now - kid_level_ms < 2000) ? kid_level : current_brightness;
-    const int to = kid_bright_next(from, dir);
-    if (to < 0) return;
-
-    char value[8];
-    snprintf(value, sizeof(value), "%d", to);
-    const char *args[] = {DEV_SCRIPT "bright.sh", value, NULL};
-    run_exec(args, A_SIZE(args), 1, 0, NULL, NULL);
-    kid_level = to;
-    kid_level_ms = now;
+    kid_bright_press(dir, current_brightness, now);
 }
 
 void hotkeys_volume_bright_task(void) {

@@ -2,6 +2,19 @@
 
 // Kid mode: a GBA-like experience for young children.
 // Enabled when the flag file KID_MODE_FLAG exists. The result is read once and cached.
+//
+// Two checks, on purpose:
+//   kid_mode_active()  kid mode installed (cached). Device-wide rules that stay even after the
+//                      parent combo: in-game hotkeys off, X=A/Y=B, no save states, kid brightness
+//                      ladder, power-loss box hidden, clock save, Wi-Fi/Bluetooth off.
+//   kid_child_active() kid mode and the parent combo not used since boot (checked every call).
+//                      Child-only rules: kid picker, kid sounds, kid error/low-battery messages,
+//                      emergency combos off, 3-minute idle sleep.
+//
+// Kid screens are laid out for the RG34XX's 720x480 display; most sizes scale from the screen
+// size, but a few fixed pixel sizes (buttons, panels, battery icon) assume that resolution.
+
+#include <stdint.h>
 #define KID_MODE_FLAG "/opt/muos/config/kidmode"
 
 // Written by the parent combo in the kid picker; kid mode menus stay off until reboot.
@@ -50,3 +63,20 @@ static inline int kid_bright_next(const int current, const int dir) {
 }
 
 int kid_mode_active(void);
+
+// One kid brightness press (dir +1 / -1): steps the ladder from the level last set (trusted for
+// 2 s, because the device brightness reading catches up later) or from `current`, and runs
+// bright.sh. Shared by the picker and the in-game runner so both behave the same.
+void kid_bright_press(int dir, int current, uint32_t now_ms);
+
+// Low-battery reminder pacing: warn once when the battery turns low, then every
+// KID_LOW_REPEAT_MS while it stays low. Returns 1 when a warning should show now; `busy`
+// (another box on screen) postpones it without using up the warning.
+#define KID_LOW_REPEAT_MS (5 * 60 * 1000)
+
+typedef struct {
+    int warned;
+    uint32_t warned_ms;
+} kid_low_warn;
+
+int kid_low_warn_due(kid_low_warn *w, int low, int busy, uint32_t now_ms);

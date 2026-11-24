@@ -776,7 +776,6 @@ static void pause_menu_header_fade_tick(const uint32_t now) {
 // Kid mode: an orange "BATTERY LOW! / PLEASE CHARGE" banner across the top of the game.
 #define KID_LOW_POLL_MS   5000
 #define KID_LOW_SHOW_MS   5000
-#define KID_LOW_REPEAT_MS (5 * 60 * 1000)
 
 static void kid_low_build(void) {
     const int sw = device.mux.width;
@@ -836,23 +835,12 @@ static void kid_low_show(void) {
 
 static void kid_low_tick(const uint32_t now) {
     static uint32_t next_poll;
-    static uint32_t warned_ms;
-    static int warned;
+    static kid_low_warn warn;
 
     if (!kid_low_panel || !SDL_TICKS_PASSED(now, next_poll)) return;
     next_poll = now + KID_LOW_POLL_MS;
 
-    if (!kid_battery_low()) {
-        warned = 0;
-        return;
-    }
-
-    if (active || toast_active) return;
-    if (warned && now - warned_ms < KID_LOW_REPEAT_MS) return;
-
-    warned = 1;
-    warned_ms = now;
-    kid_low_show();
+    if (kid_low_warn_due(&warn, kid_battery_low(), active || toast_active, now)) kid_low_show();
 }
 
 void pause_menu_service_tick(const uint32_t now) {

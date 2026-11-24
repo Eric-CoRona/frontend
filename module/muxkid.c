@@ -13,7 +13,6 @@
 #define KID_PARENT_MS  3000
 #define KID_GBA_CAT    "Nintendo Game Boy Advance"
 #define KID_BAT_POLL_MS   5000
-#define KID_LOW_REPEAT_MS (5 * 60 * 1000)
 
 
 typedef struct {
@@ -62,8 +61,7 @@ static lv_obj_t *bat_icon;
 static lv_obj_t *pnl_low;
 static lv_obj_t *msg_panel;
 static int confirm_yes;
-static uint32_t low_warned_ms;
-static int low_warned;
+static kid_low_warn low_warn;
 
 static lv_obj_t *pnl_msg;
 static lv_obj_t *lbl_msg;
@@ -272,13 +270,25 @@ static void place_tile(const int slot, const int x, const int w, const int h) {
 }
 
 // Loading a cover resets its zoom to 100%; put the side tiles' zoom back once it lands.
+// The timer only runs for about a second after a cover change, then pauses (saves battery).
+#define ZOOM_FIX_MS    30
+#define ZOOM_FIX_TICKS 34
+
+static lv_timer_t *zoom_timer = NULL;
+static int zoom_fix_left = 0;
+
+static void zoom_fix_arm(void) {
+    zoom_fix_left = ZOOM_FIX_TICKS;
+    if (zoom_timer) lv_timer_resume(zoom_timer);
+}
+
 static void zoom_fix_task(lv_timer_t *timer) {
-    LV_UNUSED(timer);
     if (slide_running) return;
     for (int i = 0; i < slot_count; i++) {
         const int zoom = tile_zoom(i, lv_obj_get_width(tile[i]));
         if (lv_img_get_zoom(tile_img[i]) != zoom) lv_img_set_zoom(tile_img[i], (uint16_t) zoom);
     }
+    if (--zoom_fix_left <= 0) lv_timer_pause(timer);
 }
 
 // Frame size for a slot: snug around the cover (outline included), or the standard box.
@@ -336,6 +346,7 @@ static void fill_tile(const int slot, const int index) {
             (int16_t) (tile_h[slot_cur] - 2 * KID_BORDER_CUR), 0, 0, 0, 0
         };
         update_image(tile_img[slot], settings);
+        zoom_fix_arm();
     } else {
         clear_image(tile_img[slot]);
         lv_obj_add_flag(tile_img[slot], LV_OBJ_FLAG_HIDDEN);
@@ -728,38 +739,13 @@ static void kid_battery_task(lv_timer_t *timer) {
     LV_UNUSED(timer);
     kid_battery_set(bat_icon, kid_battery_percent(), kid_battery_charging());
 
-    if (!kid_battery_low()) {
-        low_warned = 0;
-        return;
-    }
-
-    const uint32_t now = SDL_GetTicks();
-    if (low_warned && now - low_warned_ms < KID_LOW_REPEAT_MS) return;
-    if (confirm_open || msg_open) return;
-
-    low_warned = 1;
-    low_warned_ms = now;
+    if (!kid_low_warn_due(&low_warn, kid_battery_low(), confirm_open || msg_open, SDL_GetTicks())) return;
     play_sound(snd_error);
     open_panel(pnl_low);
 }
 
-// Brightness level we last set; trusted for a moment because current_brightness catches up a
-// little later, so quick presses keep stepping instead of repeating the same level.
-static int kid_level = -1;
-static uint32_t kid_level_ms;
-
 static void kid_bright(const int dir) {
-    const uint32_t now = SDL_GetTicks();
-    const int from = (kid_level >= 0 && now - kid_level_ms < 2000) ? kid_level : current_brightness;
-    const int to = kid_bright_next(from, dir);
-    if (to < 0) return;
-
-    char value[8];
-    snprintf(value, sizeof(value), "%d", to);
-    const char *args[] = {DEV_SCRIPT "bright.sh", value, NULL};
-    run_exec(args, A_SIZE(args), 1, 0, NULL, NULL);
-    kid_level = to;
-    kid_level_ms = now;
+    kid_bright_press(dir, current_brightness, SDL_GetTicks());
 }
 
 // Holding L2/R2 repeats quickly; space the brightness steps out so each one lands.
@@ -795,6 +781,7 @@ static void slide_step(void *var, const int32_t v) {
 static void slide_done(lv_anim_t *a) {
     LV_UNUSED(a);
     slide_running = 0;
+    zoom_fix_arm();
 }
 
 static void slide_start(void) {
@@ -817,6 +804,7 @@ static void slide_finish(void) {
     lv_anim_del(&slide_var, NULL);
     slide_step(NULL, 256);
     slide_running = 0;
+    zoom_fix_arm();
 }
 
 static void move(const int dir) {
@@ -999,7 +987,8 @@ int muxkid_main(void) {
 
     lv_timer_t *rescan = game_count > 0 ? NULL : lv_timer_create(rescan_task, 2000, NULL);
     lv_timer_t *bat_timer = lv_timer_create(kid_battery_task, KID_BAT_POLL_MS, NULL);
-    lv_timer_t *zoom_timer = lv_timer_create(zoom_fix_task, 30, NULL);
+    zoom_timer = lv_timer_create(zoom_fix_task, ZOOM_FIX_MS, NULL);
+    zoom_fix_arm();
 
     // A game that failed to start or crashed: say so in kid words, once.
     if (file_exist(KID_ERROR_FILE)) {
@@ -1053,6 +1042,7 @@ int muxkid_main(void) {
     if (rescan && game_count == 0) lv_timer_del(rescan);
     lv_timer_del(bat_timer);
     lv_timer_del(zoom_timer);
+    zoom_timer = NULL;
     lv_anim_del(&slide_var, NULL);
     slide_running = 0;
 

@@ -125,10 +125,11 @@ void crash_ui_check(struct theme_config *t, const struct mux_lang *l, lv_obj_t *
     char *crashed = read_all_char_from(MUOS_CRS_LOAD);
     remove(MUOS_CRS_LOAD);
 
-    // Kid mode: no technical crash box; the picker shows a kid message instead.
+    // Kid mode: no technical crash box. Only a crash in the game runner gets a kid message
+    // ("the game stopped"); any other module just comes back quietly.
     if (crashed && *crashed && kid_child_active()) {
         increment_counter_file(CONF_CONFIG_PATH "count/crash");
-        write_text_to_file(KID_ERROR_FILE, "w", CHAR, crashed);
+        if (strstr(crashed, "muxretro")) write_text_to_file(KID_ERROR_FILE, "w", CHAR, "game");
         free(crashed);
         return;
     }

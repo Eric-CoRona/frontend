@@ -664,6 +664,7 @@ void core_prime_audio(void) {
 }
 
 static int abort_startup(const int core_opened) {
+    if (kid_child_active()) write_text_to_file(KID_ERROR_FILE, "w", CHAR, "start");
     governor_boost_end();
     if (core_opened) core_unload();
     loading_message_hide();

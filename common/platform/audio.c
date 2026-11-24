@@ -13,6 +13,7 @@
 #include <common/base/strutil.h>
 #include <common/content/content.h>
 #include <common/base/options.h>
+#include <common/config/kidmode.h>
 
 int fe_snd;
 int fe_bgm;
@@ -203,11 +204,14 @@ void init_fe_snd(int *fe_snd, const int snd_type, const int re_init) {
     *fe_snd = 0;
     free_sound_cache();
 
-    if (!snd_type && !re_init) return;
+    // Kid mode always uses its own sound set, even when menu sounds are switched off.
+    const int kid_sounds = kid_child_active() && dir_exist(KID_SOUND_DIR);
+    if (!kid_sounds && !snd_type && !re_init) return;
 
     char base_path[MAX_BUFFER_SIZE];
     snprintf(base_path, sizeof(base_path), "%s", STORAGE_SOUND);
     if (snd_type == 2) snprintf(base_path, sizeof(base_path), "%s/sound", theme_base);
+    if (kid_sounds) snprintf(base_path, sizeof(base_path), "%s", KID_SOUND_DIR);
 
     if (!dir_exist(base_path)) {
         LOG_INFO("audio", "Sound directory not found: %s", base_path);

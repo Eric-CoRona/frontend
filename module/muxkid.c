@@ -975,6 +975,16 @@ int muxkid_main(void) {
     lv_timer_t *rescan = game_count > 0 ? NULL : lv_timer_create(rescan_task, 2000, NULL);
     lv_timer_t *bat_timer = lv_timer_create(kid_battery_task, KID_BAT_POLL_MS, NULL);
     lv_timer_t *zoom_timer = lv_timer_create(zoom_fix_task, 30, NULL);
+
+    // A game that failed to start or crashed: say so in kid words, once.
+    if (file_exist(KID_ERROR_FILE)) {
+        char *why = read_all_char_from(KID_ERROR_FILE);
+        remove(KID_ERROR_FILE);
+        play_sound(snd_error);
+        show_msg(why && strcmp(why, "start") == 0 ? "THIS GAME DIDN'T START.\nASK DAD!"
+                                                  : "OOPS! THE GAME STOPPED.\nASK DAD!");
+        free(why);
+    }
     kid_battery_task(NULL);
 
     init_timer(ui_gen_refresh_task, NULL);

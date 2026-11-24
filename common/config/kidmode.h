@@ -14,6 +14,16 @@
 // Lowest kid brightness: muOS's own safe minimum (bright.sh brings 0 back up to this).
 #define KID_MIN_BRIGHT 10
 
+// Kid UI sounds (8-bit blips), used instead of the theme's sounds in kid mode.
+#define KID_SOUND_DIR "/opt/muos/share/kid/sound"
+
+// Left by the game runner when a game fails to start or crashes; the picker shows a kid
+// message for it and removes it.
+#define KID_ERROR_FILE "/tmp/kid_game_error"
+
+// Kid picker in charge (kid mode on and the parent combo not used since boot).
+int kid_child_active(void);
+
 // bright.sh argument for one dim step from `current`: a normal step, the last step down to
 // KID_MIN_BRIGHT, or NULL when already there (so the screen never goes black).
 static inline const char *kid_dim_arg(const int current, const int step) {

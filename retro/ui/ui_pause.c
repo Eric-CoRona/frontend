@@ -1239,7 +1239,8 @@ void pause_menu_init(void) {
 
     init_fonts();
 
-    if (config.settings.general.sound && init_audio_backend()) init_fe_snd(&fe_snd, config.settings.general.sound, 0);
+    if ((config.settings.general.sound || kid_child_active()) && init_audio_backend())
+        init_fe_snd(&fe_snd, config.settings.general.sound, 0);
 
     create_dim_overlay();
     create_fps_label();

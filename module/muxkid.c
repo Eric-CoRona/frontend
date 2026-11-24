@@ -19,6 +19,9 @@
 typedef struct {
     char path[PATH_MAX];
     char name[256];
+    int art_known; // cover size looked up yet?
+    int art_w;     // cover size at the middle tile's scale (0 = no cover)
+    int art_h;
 } kid_game;
 
 static kid_game *games;
@@ -140,6 +143,8 @@ static void add_games_from(const char *dir, const int in_gba_dir, const int dept
         kid_game *g = &games[game_count++];
         snprintf(g->path, sizeof(g->path), "%s", full);
         make_display_name(ent->d_name, g->name, sizeof(g->name));
+        g->art_known = 0;
+        g->art_w = g->art_h = 0;
     }
 
     closedir(d);
@@ -213,11 +218,56 @@ static int tile_h[slot_count];
 
 // Covers are always loaded at the middle tile's size; side tiles show them zoomed down,
 // so a tile can slide between positions without reloading its picture.
+#define KID_BORDER_CUR  5
+#define KID_BORDER_SIDE 3
+
+static int tgt_w[slot_count]; // where each tile is heading: its own cover's shape
+static int tgt_h[slot_count];
+
+// Width and height of a PNG, from its header (box art is PNG).
+static int png_size(const char *path, int *w, int *h) {
+    unsigned char hdr[24];
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    const size_t n = fread(hdr, 1, sizeof(hdr), f);
+    fclose(f);
+    if (n != sizeof(hdr) || memcmp(hdr + 1, "PNG", 3) != 0 || memcmp(hdr + 12, "IHDR", 4) != 0) return 0;
+    *w = (int) ((uint32_t) hdr[16] << 24 | (uint32_t) hdr[17] << 16 | (uint32_t) hdr[18] << 8 | hdr[19]);
+    *h = (int) ((uint32_t) hdr[20] << 24 | (uint32_t) hdr[21] << 16 | (uint32_t) hdr[22] << 8 | hdr[23]);
+    return *w > 0 && *h > 0 && *w <= 8192 && *h <= 8192;
+}
+
+// Largest cover size inside the middle tile, keeping its shape (same maths as update_image).
+static void cover_fit(const int iw, const int ih, int *aw, int *ah) {
+    const float wr = (float) (tile_w[slot_cur] - 2 * KID_BORDER_CUR) / (float) iw;
+    const float hr = (float) (tile_h[slot_cur] - 2 * KID_BORDER_CUR) / (float) ih;
+    const float zr = wr < hr ? wr : hr;
+    *aw = (int) ((float) iw * zr);
+    *ah = (int) ((float) ih * zr);
+}
+
+// Side tiles are the middle tile shrunk by this factor (x1000).
+static int side_k(void) {
+    const int kw = tile_w[slot_prev] * 1000 / tile_w[slot_cur];
+    const int kh = tile_h[slot_prev] * 1000 / tile_h[slot_cur];
+    return kw < kh ? kw : kh;
+}
+
+// The middle-tile width for whatever game a tile shows (cover + outline, or the plain box).
+static int cur_width_for(const int game) {
+    if (game >= 0 && game < game_count && games[game].art_w > 0) return games[game].art_w + 2 * KID_BORDER_CUR;
+    return tile_w[slot_cur];
+}
+
+static int tile_zoom(const int slot, const int w) {
+    const int zoom = LV_IMG_ZOOM_NONE * w / cur_width_for(tile_game[slot]);
+    return zoom > 0 ? zoom : 1;
+}
+
 static void place_tile(const int slot, const int x, const int w, const int h) {
     lv_obj_set_size(tile[slot], w, h);
     lv_obj_align(tile[slot], LV_ALIGN_CENTER, x, tile_y);
-    const int zoom = LV_IMG_ZOOM_NONE * w / tile_w[slot_cur];
-    lv_img_set_zoom(tile_img[slot], (uint16_t) (zoom > 0 ? zoom : 1));
+    lv_img_set_zoom(tile_img[slot], (uint16_t) tile_zoom(slot, w));
 }
 
 // Loading a cover resets its zoom to 100%; put the side tiles' zoom back once it lands.
@@ -225,8 +275,24 @@ static void zoom_fix_task(lv_timer_t *timer) {
     LV_UNUSED(timer);
     if (slide_running) return;
     for (int i = 0; i < slot_count; i++) {
-        const int zoom = LV_IMG_ZOOM_NONE * lv_obj_get_width(tile[i]) / tile_w[slot_cur];
-        if (lv_img_get_zoom(tile_img[i]) != zoom) lv_img_set_zoom(tile_img[i], (uint16_t) (zoom > 0 ? zoom : 1));
+        const int zoom = tile_zoom(i, lv_obj_get_width(tile[i]));
+        if (lv_img_get_zoom(tile_img[i]) != zoom) lv_img_set_zoom(tile_img[i], (uint16_t) zoom);
+    }
+}
+
+// Frame size for a slot: snug around the cover (outline included), or the standard box.
+static void slot_target(const int slot, const int game) {
+    const kid_game *g = &games[game];
+    if (g->art_w <= 0) {
+        tgt_w[slot] = tile_w[slot];
+        tgt_h[slot] = tile_h[slot];
+    } else if (slot == slot_cur) {
+        tgt_w[slot] = g->art_w + 2 * KID_BORDER_CUR;
+        tgt_h[slot] = g->art_h + 2 * KID_BORDER_CUR;
+    } else {
+        const int k = side_k();
+        tgt_w[slot] = g->art_w * k / 1000 + 2 * KID_BORDER_SIDE;
+        tgt_h[slot] = g->art_h * k / 1000 + 2 * KID_BORDER_SIDE;
     }
 }
 
@@ -245,18 +311,28 @@ static void fill_tile(const int slot, const int index) {
     lv_obj_set_style_text_color(tile_lbl[slot], lv_color_hex(cur ? KID_COL_GREEN : KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
     lv_obj_set_width(tile_lbl[slot], tile_w[slot] - 24);
 
+    kid_game *g = &games[index];
+    char art[PATH_MAX];
+    const int has_art = box_art_path(g, art, sizeof(art));
+
+    if (!g->art_known) {
+        int iw = 0, ih = 0;
+        g->art_known = 1;
+        g->art_w = g->art_h = 0;
+        if (has_art && png_size(art, &iw, &ih)) cover_fit(iw, ih, &g->art_w, &g->art_h);
+    }
+    slot_target(slot, index);
+
     if (tile_game[slot] == index) return;
     tile_game[slot] = index;
 
-    const kid_game *g = &games[index];
-    char art[PATH_MAX];
-
-    if (box_art_path(g, art, sizeof(art))) {
+    if (has_art) {
         lv_obj_add_flag(tile_lbl[slot], LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(tile_img[slot], LV_OBJ_FLAG_HIDDEN);
 
         const struct image_settings settings = {
-            art, LV_ALIGN_CENTER, (int16_t) (tile_w[slot_cur] - 8), (int16_t) (tile_h[slot_cur] - 8), 0, 0, 0, 0
+            art, LV_ALIGN_CENTER, (int16_t) (tile_w[slot_cur] - 2 * KID_BORDER_CUR),
+            (int16_t) (tile_h[slot_cur] - 2 * KID_BORDER_CUR), 0, 0, 0, 0
         };
         update_image(tile_img[slot], settings);
     } else {
@@ -306,6 +382,11 @@ static void refresh_carousel(void) {
     fill_tile(slot_next, wrap_index(current_game + 1));
 
     set_name_text(games[current_game].name);
+
+    // Outside a slide, put each frame straight at its cover's shape.
+    if (!slide_running) {
+        for (int i = 0; i < slot_count; i++) place_tile(i, tile_x[i], tgt_w[i], tgt_h[i]);
+    }
 
     char count[32];
     snprintf(count, sizeof(count), "%d / %d", current_game + 1, game_count);
@@ -411,6 +492,8 @@ static void build_ui(void) {
         lv_obj_set_width(tile_lbl[s], tile_w[s] - 24);
         lv_label_set_long_mode(tile_lbl[s], LV_LABEL_LONG_WRAP);
         lv_obj_center(tile_lbl[s]);
+        tgt_w[s] = tile_w[s];
+        tgt_h[s] = tile_h[s];
         place_tile(s, tile_x[s], tile_w[s], tile_h[s]);
     }
 
@@ -678,8 +761,8 @@ static void slide_step(void *var, const int32_t v) {
     LV_UNUSED(var);
     for (int i = 0; i < slot_count; i++) {
         const int x = slide_from_x[i] + (tile_x[i] - slide_from_x[i]) * v / 256;
-        const int w = slide_from_w[i] + (tile_w[i] - slide_from_w[i]) * v / 256;
-        const int h = slide_from_h[i] + (tile_h[i] - slide_from_h[i]) * v / 256;
+        const int w = slide_from_w[i] + (tgt_w[i] - slide_from_w[i]) * v / 256;
+        const int h = slide_from_h[i] + (tgt_h[i] - slide_from_h[i]) * v / 256;
         place_tile(i, x, w, h);
     }
 }
@@ -756,21 +839,24 @@ static void move(const int dir) {
         from[slot_next] = slot_cur;
     }
 
+    // Tiles that were already on screen start from their current frame.
     for (int i = 0; i < slot_count; i++) {
-        if (from[i] >= 0) {
-            slide_from_x[i] = tile_x[from[i]];
-            slide_from_w[i] = tile_w[from[i]];
-            slide_from_h[i] = tile_h[from[i]];
-        } else {
-            // The new tile comes in from just past its edge.
-            slide_from_x[i] = tile_x[i] * 2;
-            slide_from_w[i] = tile_w[i];
-            slide_from_h[i] = tile_h[i];
-        }
+        if (from[i] < 0) continue;
+        slide_from_x[i] = tile_x[from[i]];
+        slide_from_w[i] = lv_obj_get_width(tile[i]);
+        slide_from_h[i] = lv_obj_get_height(tile[i]);
     }
 
     current_game = wrap_index(current_game + dir);
     refresh_carousel();
+
+    // The new tile comes in from just past its edge, already at its own shape.
+    for (int i = 0; i < slot_count; i++) {
+        if (from[i] >= 0) continue;
+        slide_from_x[i] = tile_x[i] * 2;
+        slide_from_w[i] = tgt_w[i];
+        slide_from_h[i] = tgt_h[i];
+    }
     refresh_focus();
     lv_obj_move_foreground(tile[slot_cur]);
     slide_start();

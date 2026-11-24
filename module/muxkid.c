@@ -43,6 +43,7 @@ static int slide_from_x[slot_count], slide_from_w[slot_count], slide_from_h[slot
 static int slide_running;
 static int slide_var; // animation handle (address only)
 static lv_obj_t *lbl_name;
+static lv_obj_t *lbl_name_shadow;
 static lv_obj_t *lbl_count;
 static lv_obj_t *lbl_empty;
 static lv_obj_t *btn_power;
@@ -237,10 +238,10 @@ static void fill_tile(const int slot, const int index) {
     }
     lv_obj_clear_flag(tile[slot], LV_OBJ_FLAG_HIDDEN);
 
-    // Name tile text: bigger in the middle.
+    // Name tile text: same size everywhere, green in the middle.
     const int cur = slot == slot_cur;
-    lv_obj_set_style_text_font(tile_lbl[slot], kid_font(cur ? 3 : 2), MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_text_line_space(tile_lbl[slot], cur ? 6 : 4, MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_font(tile_lbl[slot], kid_font(2), MU_OBJ_MAIN_DEFAULT);
+    lv_obj_set_style_text_line_space(tile_lbl[slot], 4, MU_OBJ_MAIN_DEFAULT);
     lv_obj_set_style_text_color(tile_lbl[slot], lv_color_hex(cur ? KID_COL_GREEN : KID_COL_BLUE), MU_OBJ_MAIN_DEFAULT);
     lv_obj_set_width(tile_lbl[slot], tile_w[slot] - 24);
 
@@ -271,19 +272,22 @@ static void fill_tile(const int slot, const int index) {
 // a size smaller when it doesn't, and "..." only if it is still too long.
 static void set_name_text(const char *name) {
     const lv_coord_t w = lv_obj_get_width(lbl_name);
-    int scale = 4;
+    int scale = 3;
 
-    for (; scale > 3; scale--) {
+    for (; scale > 2; scale--) {
         lv_point_t size;
         lv_txt_get_size(&size, name, kid_font(scale), 0, scale * 2, w, LV_TEXT_FLAG_NONE);
         if (size.y <= kid_font(scale)->line_height * 2 + scale * 2) break;
     }
 
     const lv_font_t *f = kid_font(scale);
-    lv_obj_set_style_text_font(lbl_name, f, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_style_text_line_space(lbl_name, scale * 2, MU_OBJ_MAIN_DEFAULT);
-    lv_obj_set_height(lbl_name, f->line_height * 2 + scale * 2);
-    lv_label_set_text(lbl_name, name);
+    lv_obj_t *labels[2] = {lbl_name_shadow, lbl_name};
+    for (int i = 0; i < 2; i++) {
+        lv_obj_set_style_text_font(labels[i], f, MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_style_text_line_space(labels[i], scale * 2, MU_OBJ_MAIN_DEFAULT);
+        lv_obj_set_height(labels[i], f->line_height * 2 + scale * 2);
+        lv_label_set_text(labels[i], name);
+    }
 }
 
 static void refresh_carousel(void) {
@@ -291,6 +295,7 @@ static void refresh_carousel(void) {
         for (int s = 0; s < slot_count; s++)
             lv_obj_add_flag(tile[s], LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_name, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lbl_name_shadow, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_count, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lbl_empty, LV_OBJ_FLAG_HIDDEN);
         return;
@@ -409,11 +414,17 @@ static void build_ui(void) {
         place_tile(s, tile_x[s], tile_w[s], tile_h[s]);
     }
 
-    // Game name under the middle tile: up to two lines of large text.
-    lbl_name = make_label(ui_screen, 4, KID_COL_WHITE);
+    // Game name under the middle tile: up to two lines, with a dark drop shadow behind it.
+    const int name_y = sh / 2 + y + tile_h[slot_cur] / 2 + sh * 3 / 100;
+    lbl_name_shadow = make_label(ui_screen, 3, KID_COL_SHADOW);
+    lv_obj_set_width(lbl_name_shadow, sw - sw * 8 / 100);
+    lv_label_set_long_mode(lbl_name_shadow, LV_LABEL_LONG_DOT);
+    lv_obj_align(lbl_name_shadow, LV_ALIGN_TOP_MID, 2, name_y + 2);
+
+    lbl_name = make_label(ui_screen, 3, KID_COL_WHITE);
     lv_obj_set_width(lbl_name, sw - sw * 8 / 100);
     lv_label_set_long_mode(lbl_name, LV_LABEL_LONG_DOT);
-    lv_obj_align(lbl_name, LV_ALIGN_TOP_MID, 0, sh / 2 + y + tile_h[slot_cur] / 2 + sh * 3 / 100);
+    lv_obj_align(lbl_name, LV_ALIGN_TOP_MID, 0, name_y);
 
     // The "2 / 5" counter is kept for the empty-state logic but not shown.
     lbl_count = make_label(ui_screen, 2, KID_COL_SEA);
@@ -609,6 +620,7 @@ static void rescan_task(lv_timer_t *timer) {
     if (game_count > 0) {
         lv_obj_add_flag(lbl_empty, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lbl_name, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(lbl_name_shadow, LV_OBJ_FLAG_HIDDEN);
         refresh_carousel();
         refresh_focus();
         lv_timer_del(timer);

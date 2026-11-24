@@ -17,7 +17,7 @@
 #define KID_LOW_BATTERY_PCT 10
 
 // A 5x7 pixel font drawn at a whole-number scale (1 to 8), so letters stay crisp.
-// Lowercase letters use the capital shapes, like the logo.
+// Lowercase letters have their own shapes (with descenders), so game names read easily.
 const lv_font_t *kid_font(int scale);
 
 // Paints the boot-screen background (navy to teal gradient with a faint pixel dot grid) on obj.

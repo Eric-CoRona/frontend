@@ -31,7 +31,9 @@ static int exit_status;
 static uint32_t parent_hold_start;
 static int parent_fired;
 
-enum { slot_prev, slot_cur, slot_next, slot_count };
+// Five covers: the middle one, a smaller one each side, and a smaller, dimmed one past those
+// (cut off by the screen edge). The outer two only show with 5 or more games.
+enum { slot_far_prev, slot_prev, slot_cur, slot_next, slot_far_next, slot_count };
 
 static lv_obj_t *tile[slot_count];
 static lv_obj_t *tile_img[slot_count];
@@ -42,6 +44,7 @@ static int tile_game[slot_count]; // game loaded into each tile object (-1 = non
 static int tile_y;
 static int tile_x[slot_count];
 static int slide_from_x[slot_count], slide_from_w[slot_count], slide_from_h[slot_count];
+static int slide_from_opa[slot_count];
 static int slide_running;
 static int slide_var; // animation handle (address only)
 static lv_obj_t *lbl_name;
@@ -245,11 +248,23 @@ static void cover_fit(const int iw, const int ih, int *aw, int *ah) {
     *ah = (int) ((float) ih * zr);
 }
 
-// Side tiles are the middle tile shrunk by this factor (x1000).
-static int side_k(void) {
-    const int kw = tile_w[slot_prev] * 1000 / tile_w[slot_cur];
-    const int kh = tile_h[slot_prev] * 1000 / tile_h[slot_cur];
+// Other tiles are the middle tile shrunk by this factor (x1000).
+static int slot_k(const int slot) {
+    const int kw = tile_w[slot] * 1000 / tile_w[slot_cur];
+    const int kh = tile_h[slot] * 1000 / tile_h[slot_cur];
     return kw < kh ? kw : kh;
+}
+
+// Distance from the middle: 0, 1 (beside it) or 2 (outer, dimmed).
+static int slot_dist(const int slot) {
+    return slot > slot_cur ? slot - slot_cur : slot_cur - slot;
+}
+
+// Outer covers are dimmed with plain opacity on the dark background: cheap to draw,
+// and no edge fade over moving covers.
+static int slot_opa(const int slot) {
+    static const int opa[] = {LV_OPA_COVER, LV_OPA_COVER, LV_OPA_50};
+    return opa[slot_dist(slot)];
 }
 
 // The middle-tile width for whatever game a tile shows (cover + outline, or the plain box).
@@ -301,14 +316,17 @@ static void slot_target(const int slot, const int game) {
         tgt_w[slot] = g->art_w + 2 * KID_BORDER_CUR;
         tgt_h[slot] = g->art_h + 2 * KID_BORDER_CUR;
     } else {
-        const int k = side_k();
+        const int k = slot_k(slot);
         tgt_w[slot] = g->art_w * k / 1000 + 2 * KID_BORDER_SIDE;
         tgt_h[slot] = g->art_h * k / 1000 + 2 * KID_BORDER_SIDE;
     }
 }
 
 static void fill_tile(const int slot, const int index) {
-    const int visible = game_count > 0 && (slot == slot_cur || game_count > 2 || (game_count == 2 && slot == slot_next));
+    const int dist = slot_dist(slot);
+    const int visible = game_count > 0 &&
+                        (dist == 0 || (dist == 1 && (game_count > 2 || (game_count == 2 && slot == slot_next))) ||
+                         (dist == 2 && game_count >= 5));
     if (!visible) {
         lv_obj_add_flag(tile[slot], LV_OBJ_FLAG_HIDDEN);
         return;
@@ -401,15 +419,16 @@ static void refresh_carousel(void) {
         return;
     }
 
-    fill_tile(slot_prev, wrap_index(current_game - 1));
-    fill_tile(slot_cur, current_game);
-    fill_tile(slot_next, wrap_index(current_game + 1));
+    for (int s = 0; s < slot_count; s++) fill_tile(s, wrap_index(current_game + s - slot_cur));
 
     set_name_text(games[current_game].name);
 
     // Outside a slide, put each frame straight at its cover's shape.
     if (!slide_running) {
-        for (int i = 0; i < slot_count; i++) place_tile(i, tile_x[i], tgt_w[i], tgt_h[i]);
+        for (int i = 0; i < slot_count; i++) {
+            place_tile(i, tile_x[i], tgt_w[i], tgt_h[i]);
+            lv_obj_set_style_opa(tile[i], (lv_opa_t) slot_opa(i), MU_OBJ_MAIN_DEFAULT);
+        }
     }
 
     char count[32];
@@ -492,13 +511,16 @@ static void build_ui(void) {
     tile_h[slot_cur] = sh * 53 / 100; // covers 20% bigger than the first layout
     tile_w[slot_prev] = tile_w[slot_next] = sw * 22 / 100;
     tile_h[slot_prev] = tile_h[slot_next] = sh * 36 / 100;
+    tile_w[slot_far_prev] = tile_w[slot_far_next] = tile_w[slot_prev] * 2 / 3;
+    tile_h[slot_far_prev] = tile_h[slot_far_next] = tile_h[slot_prev] * 2 / 3;
 
     const int y = -sh * 7 / 100;
-    const int side_x = sw * 36 / 100;
     tile_y = y;
-    tile_x[slot_prev] = -side_x;
+    tile_x[slot_far_prev] = -sw * 48 / 100;
+    tile_x[slot_prev] = -sw * 30 / 100;
     tile_x[slot_cur] = 0;
-    tile_x[slot_next] = side_x;
+    tile_x[slot_next] = sw * 30 / 100;
+    tile_x[slot_far_next] = sw * 48 / 100;
 
     for (int s = 0; s < slot_count; s++) {
         tile_game[s] = -1;
@@ -659,9 +681,9 @@ static void refresh_focus(void) {
         );
     }
 
+    for (int s = 0; s < slot_count; s++)
+        if (s != slot_cur) set_panel_focus(tile[s], 0);
     if (game_count > 0) set_panel_focus(tile[slot_cur], !power_focus);
-    set_panel_focus(tile[slot_prev], 0);
-    set_panel_focus(tile[slot_next], 0);
 }
 
 static void refresh_confirm(void) {
@@ -768,19 +790,65 @@ static void handle_r2(void) {
     ui_common_handle_bright_up();
 }
 
+// Slide timing, for checking smoothness on the device: the first KID_PERF_SLIDES slides after
+// boot are measured (time between animation frames) and summed up once in KID_PERF_FILE.
+#define KID_PERF_FILE   "/opt/muos/config/kid_slide_perf"
+#define KID_PERF_SLIDES 30
+
+static struct {
+    int slides, frames, slow, worst;
+    uint32_t total_ms, last_ms;
+    int written;
+} perf;
+
+static void perf_frame(void) {
+    if (perf.written) return;
+    const uint32_t now = SDL_GetTicks();
+    if (perf.last_ms) {
+        const int gap = (int) (now - perf.last_ms);
+        perf.frames++;
+        perf.total_ms += (uint32_t) gap;
+        if (gap > perf.worst) perf.worst = gap;
+        if (gap > 20) perf.slow++;
+    }
+    perf.last_ms = now;
+}
+
+static void perf_write(void) {
+    if (perf.written || perf.frames == 0) return;
+    perf.written = 1;
+    FILE *f = fopen(KID_PERF_FILE, "w");
+    if (!f) return;
+    fprintf(
+        f, "slides=%d frames=%d avg_ms=%.1f worst_ms=%d frames_over_20ms=%d\n", perf.slides, perf.frames,
+        (double) perf.total_ms / perf.frames, perf.worst, perf.slow
+    );
+    fclose(f);
+}
+
+static void perf_slide_end(void) {
+    perf.last_ms = 0;
+    if (perf.written) return;
+    if (++perf.slides >= KID_PERF_SLIDES) perf_write();
+}
+
 static void slide_step(void *var, const int32_t v) {
     LV_UNUSED(var);
+    perf_frame();
     for (int i = 0; i < slot_count; i++) {
         const int x = slide_from_x[i] + (tile_x[i] - slide_from_x[i]) * v / 256;
         const int w = slide_from_w[i] + (tgt_w[i] - slide_from_w[i]) * v / 256;
         const int h = slide_from_h[i] + (tgt_h[i] - slide_from_h[i]) * v / 256;
         place_tile(i, x, w, h);
+        const int opa = slide_from_opa[i] + (slot_opa(i) - slide_from_opa[i]) * v / 256;
+        if (lv_obj_get_style_opa(tile[i], LV_PART_MAIN) != opa) lv_obj_set_style_opa(tile[i], (lv_opa_t) opa, MU_OBJ_MAIN_DEFAULT);
     }
 }
 
 static void slide_done(lv_anim_t *a) {
     LV_UNUSED(a);
     slide_running = 0;
+    perf_slide_end();
     zoom_fix_arm();
 }
 
@@ -804,6 +872,7 @@ static void slide_finish(void) {
     lv_anim_del(&slide_var, NULL);
     slide_step(NULL, 256);
     slide_running = 0;
+    perf_slide_end();
     zoom_fix_arm();
 }
 
@@ -830,27 +899,28 @@ static void move(const int dir) {
 
     slide_finish();
 
-    // Rotate the three tile objects one place so the pictures already loaded slide along;
+    // Rotate the tile objects one place so the pictures already loaded slide along;
     // only the tile coming in at the edge loads a new game.
-    lv_obj_t *t = tile[0], *ti = tile_img[0], *tl = tile_lbl[0];
-    int tg = tile_game[0];
+    const int last = slot_count - 1;
+    const int in = dir > 0 ? last : 0; // slot the recycled tile comes in at
+    lv_obj_t *t = tile[dir > 0 ? 0 : last], *ti = tile_img[dir > 0 ? 0 : last], *tl = tile_lbl[dir > 0 ? 0 : last];
+    const int tg = tile_game[dir > 0 ? 0 : last];
     int from[slot_count];
     if (dir > 0) {
-        tile[0] = tile[1], tile_img[0] = tile_img[1], tile_lbl[0] = tile_lbl[1], tile_game[0] = tile_game[1];
-        tile[1] = tile[2], tile_img[1] = tile_img[2], tile_lbl[1] = tile_lbl[2], tile_game[1] = tile_game[2];
-        tile[2] = t, tile_img[2] = ti, tile_lbl[2] = tl, tile_game[2] = tg;
-        from[slot_prev] = slot_cur;
-        from[slot_cur] = slot_next;
-        from[slot_next] = -1;
+        for (int i = 0; i < last; i++) {
+            tile[i] = tile[i + 1], tile_img[i] = tile_img[i + 1], tile_lbl[i] = tile_lbl[i + 1];
+            tile_game[i] = tile_game[i + 1];
+            from[i] = i + 1;
+        }
     } else {
-        t = tile[2], ti = tile_img[2], tl = tile_lbl[2], tg = tile_game[2];
-        tile[2] = tile[1], tile_img[2] = tile_img[1], tile_lbl[2] = tile_lbl[1], tile_game[2] = tile_game[1];
-        tile[1] = tile[0], tile_img[1] = tile_img[0], tile_lbl[1] = tile_lbl[0], tile_game[1] = tile_game[0];
-        tile[0] = t, tile_img[0] = ti, tile_lbl[0] = tl, tile_game[0] = tg;
-        from[slot_prev] = -1;
-        from[slot_cur] = slot_prev;
-        from[slot_next] = slot_cur;
+        for (int i = last; i > 0; i--) {
+            tile[i] = tile[i - 1], tile_img[i] = tile_img[i - 1], tile_lbl[i] = tile_lbl[i - 1];
+            tile_game[i] = tile_game[i - 1];
+            from[i] = i - 1;
+        }
     }
+    tile[in] = t, tile_img[in] = ti, tile_lbl[in] = tl, tile_game[in] = tg;
+    from[in] = -1;
 
     // Tiles that were already on screen start from their current frame.
     for (int i = 0; i < slot_count; i++) {
@@ -858,6 +928,7 @@ static void move(const int dir) {
         slide_from_x[i] = tile_x[from[i]];
         slide_from_w[i] = lv_obj_get_width(tile[i]);
         slide_from_h[i] = lv_obj_get_height(tile[i]);
+        slide_from_opa[i] = slot_opa(from[i]);
     }
 
     current_game = wrap_index(current_game + dir);
@@ -866,12 +937,16 @@ static void move(const int dir) {
     // The new tile comes in from just past its edge, already at its own shape.
     for (int i = 0; i < slot_count; i++) {
         if (from[i] >= 0) continue;
-        slide_from_x[i] = tile_x[i] * 2;
+        slide_from_x[i] = tile_x[i] + (tile_x[i] - tile_x[i + (i < slot_cur ? 1 : -1)]);
         slide_from_w[i] = tgt_w[i];
         slide_from_h[i] = tgt_h[i];
+        slide_from_opa[i] = LV_OPA_TRANSP;
     }
     refresh_focus();
-    lv_obj_move_foreground(tile[slot_cur]);
+
+    // Middle on top, then the ones beside it, then the outer ones.
+    static const int order[] = {slot_far_prev, slot_far_next, slot_prev, slot_next, slot_cur};
+    for (size_t i = 0; i < A_SIZE(order); i++) lv_obj_move_foreground(tile[order[i]]);
     slide_start();
 }
 
@@ -1043,6 +1118,7 @@ int muxkid_main(void) {
     lv_timer_del(bat_timer);
     lv_timer_del(zoom_timer);
     zoom_timer = NULL;
+    perf_write();
     lv_anim_del(&slide_var, NULL);
     slide_running = 0;
 

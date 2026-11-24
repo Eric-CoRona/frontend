@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <signal.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -830,6 +831,24 @@ static void handle_idle(void) {
 
     const uint32_t disp_timeout = config.settings.power.idle.display * 1000;
     uint32_t sleep_timeout = config.settings.power.idle.sleep * 1000;
+
+    // Kid mode: remember the time every few minutes (see KID_CLOCK_FILE).
+    static uint32_t kid_clock_next = 0;
+    if (kid_mode_active() && global_tick >= kid_clock_next) {
+        kid_clock_next = global_tick + KID_CLOCK_SAVE_SECONDS * 1000;
+        const time_t now = time(NULL);
+        if (now > 1735689600) { // only a sane clock (after 2025-01-01)
+            char tmp[] = KID_CLOCK_FILE ".tmp";
+            FILE *f = fopen(tmp, "w");
+            if (f) {
+                fprintf(f, "%lld\n", (long long) now);
+                fflush(f);
+                fsync(fileno(f));
+                fclose(f);
+                rename(tmp, KID_CLOCK_FILE);
+            }
+        }
+    }
 
     // Kid mode sleeps after a fixed 3 minutes without input (not in parent mode).
     static int kid_parent_cached = -1;

@@ -21,6 +21,12 @@
 // message for it and removes it.
 #define KID_ERROR_FILE "/tmp/kid_game_error"
 
+// Last known good time (seconds since 1970), saved every few minutes in kid mode. At boot an
+// init script puts the clock back to it if the clock reset (fully drained battery), so the
+// clock never jumps backwards for Pokemon Emerald.
+#define KID_CLOCK_FILE         "/opt/muos/config/kid_clock"
+#define KID_CLOCK_SAVE_SECONDS 600
+
 // Kid picker in charge (kid mode on and the parent combo not used since boot).
 int kid_child_active(void);
 
